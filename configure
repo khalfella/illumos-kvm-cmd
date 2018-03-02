@@ -1841,46 +1841,46 @@ if test "$kvm_cap_device_assignment" != "no" ; then
   if test "$kvm" = "no" -a "$kvm_cap_device_assignment" = "yes" ; then
       feature_not_found "kvm_cap_device_assignment (kvm is not enabled)"
   fi
-  if test "$targetos" = "SunOS" ; then
-      feature_not_found "kvm_cap_device_assignment (not supported on SunOS)"
-  fi
-  cat > $TMPC <<EOF
+#  if test "$targetos" = "SunOS" ; then
+#      feature_not_found "kvm_cap_device_assignment (not supported on SunOS)"
+#  fi
+#  cat > $TMPC <<EOF
 #include <linux/kvm.h>
 #ifndef KVM_CAP_DEVICE_ASSIGNMENT
 #error "kvm no device assignment capability"
 #endif
-int main(void) { return 0; }
-EOF
-  if compile_prog "$kvm_cflags" "" ; then
-    kvm_cap_device_assignment=yes
-  else
-    if test "$kvm_cap_device_assignment" = "yes" ; then
-      feature_not_found "kvm_cap_device_assigment"
-    fi
-    kvm_cap_device_assignment=no
-  fi
+#int main(void) { return 0; }
+#EOF
+#  if compile_prog "$kvm_cflags" "" ; then
+#    kvm_cap_device_assignment=yes
+#  else
+#    if test "$kvm_cap_device_assignment" = "yes" ; then
+#      feature_not_found "kvm_cap_device_assigment"
+#    fi
+#    kvm_cap_device_assignment=no
+#  fi
 fi
 
 ##########################################
 # libpci header probe for kvm_cap_device_assignment
-if test $kvm_cap_device_assignment = "yes" ; then
-  cat > $TMPC << EOF
+#if test $kvm_cap_device_assignment = "yes" ; then
+#  cat > $TMPC << EOF
 #include <pci/header.h>
 #ifndef PCI_VENDOR_ID
 #error NO LIBPCI HEADER
 #endif
-int main(void) { return 0; }
-EOF
-  if compile_prog "" "" ; then
-    kvm_cap_device_assignment=yes
-  else
-    echo
-    echo "Error: libpci header check failed"
-    echo "Disable KVM Device Assignment capability."
-    echo
-    kvm_cap_device_assignment=no
-  fi
-fi
+#int main(void) { return 0; }
+#EOF
+#  if compile_prog "" "" ; then
+#    kvm_cap_device_assignment=yes
+#  else
+#    echo
+#    echo "Error: libpci header check failed"
+#    echo "Disable KVM Device Assignment capability."
+#    echo
+#    kvm_cap_device_assignment=no
+#  fi
+#fi
 
 ##########################################
 # test for vhost net
