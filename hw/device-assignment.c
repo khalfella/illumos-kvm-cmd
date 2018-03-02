@@ -27,7 +27,6 @@
  */
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/io.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "qemu-kvm.h"
@@ -39,7 +38,7 @@
 #include "loader.h"
 #include "monitor.h"
 #include "range.h"
-#include <pci/header.h>
+#include <upci.h>
 #include "sysemu.h"
 
 /* From linux/ioport.h */
@@ -668,58 +667,43 @@ static int get_real_device_id(const char *devpath, uint16_t *val)
     return get_real_id(devpath, "device", val);
 }
 
-static int get_real_device(AssignedDevice *pci_dev, uint16_t r_seg,
-                           uint8_t r_bus, uint8_t r_dev, uint8_t r_func)
+static size_t
+upci_pread(int fd, char *buff, int region, off_t offset, size_t sz) {
+	return (0);
+}
+
+static int get_real_device(AssignedDevice *pci_dev, char *hostpcipath)
 {
-    char dir[128], name[128];
-    int fd, r = 0, v;
-    FILE *f;
-    unsigned long long start, end, size, flags;
-    uint16_t id;
-    struct stat statbuf;
-    PCIRegion *rp;
-    PCIDevRegions *dev = &pci_dev->real_device;
+	int fd, r = 0, v;
+	FILE *f;
+	unsigned long long start, end, size, flags;
+	uint16_t id;
+	struct stat statbuf;
+	PCIRegion *rp;
+	size_t s;
 
-    dev->region_number = 0;
+	PCIHostDevice *host = &pci_dev->host;
 
-    snprintf(dir, sizeof(dir), "/sys/bus/pci/devices/%04x:%02x:%02x.%x/",
-	     r_seg, r_bus, r_dev, r_func);
+    	host->region_number = 0;
+	if ((host->fd = open(host->hostpcipath, O_RDWR)) == 01) {
+		fprintf(stderr, "%s: %s: %m\n", __func__, name);
+		return (1);
+	}
 
-    snprintf(name, sizeof(name), "%sconfig", dir);
 
-    if (pci_dev->configfd_name && *pci_dev->configfd_name) {
-        if (qemu_isdigit(pci_dev->configfd_name[0])) {
-            dev->config_fd = strtol(pci_dev->configfd_name, NULL, 0);
-        } else {
-            dev->config_fd = monitor_get_fd(cur_mon, pci_dev->configfd_name);
-            if (dev->config_fd < 0) {
-                fprintf(stderr, "%s: (%s) unkown\n", __func__,
-                        pci_dev->configfd_name);
-                return 1;
-            }
-        }
-    } else {
-        dev->config_fd = open(name, O_RDWR);
+	s = pci_config_size(&pci_dev->dev);
+	if (upci_pread(host->fd, pci_dev->dev.config, -1, 0, s) != s) {
+        	fprintf(stderr, "%s: cfg read failed, errno = %d\n", __func__, errno);
+		return (1);
+	}
 
-        if (dev->config_fd == -1) {
-            fprintf(stderr, "%s: %s: %m\n", __func__, name);
-            return 1;
-        }
-    }
-again:
-    r = read(dev->config_fd, pci_dev->dev.config,
-             pci_config_size(&pci_dev->dev));
-    if (r < 0) {
-        if (errno == EINTR || errno == EAGAIN)
-            goto again;
-        fprintf(stderr, "%s: read failed, errno = %d\n", __func__, errno);
-    }
-
-    /* Clear host resource mapping info.  If we choose not to register a
-     * BAR, such as might be the case with the option ROM, we can get
-     * confusing, unwritable, residual addresses from the host here. */
-    memset(&pci_dev->dev.config[PCI_BASE_ADDRESS_0], 0, 24);
-    memset(&pci_dev->dev.config[PCI_ROM_ADDRESS], 0, 4);
+	/*
+	 * Clear host resource mapping info.  If we choose not to register a
+	 * BAR, such as might be the case with the option ROM, we can get
+	 * confusing, unwritable, residual addresses from the host here.
+	 */
+	memset(&pci_dev->dev.config[PCI_BASE_ADDRESS_0], 0, 24);
+	memset(&pci_dev->dev.config[PCI_ROM_ADDRESS], 0, 4);
 
     snprintf(name, sizeof(name), "%sresource", dir);
 
@@ -1726,13 +1710,8 @@ static int assigned_initfn(struct PCIDevice *pci_dev)
         return -1;
     }
 
-    if (!dev->host.seg && !dev->host.bus && !dev->host.dev && !dev->host.func) {
-        error_report("pci-assign: error: no host device specified");
-        return -1;
-    }
 
-    if (get_real_device(dev, dev->host.seg, dev->host.bus,
-                        dev->host.dev, dev->host.func)) {
+    if (get_real_device(dev, dev->host.hostpcipath)) {
         error_report("pci-assign: Error: Couldn't get real device (%s)!",
                      dev->dev.qdev.id);
         goto out;
@@ -1802,30 +1781,25 @@ static int assigned_exitfn(struct PCIDevice *pci_dev)
     return 0;
 }
 
-static int parse_hostaddr(DeviceState *dev, Property *prop, const char *str)
+static int parse_host_pci_path(DeviceState *dev, Property *prop, const char *str)
 {
-    PCIHostDevice *ptr = qdev_get_prop_ptr(dev, prop);
-    int rc;
-
-    rc = pci_parse_host_devaddr(str, &ptr->seg, &ptr->bus, &ptr->dev, &ptr->func);
-    if (rc != 0)
-        return -1;
-    return 0;
+	PCIHostDevice *ptr = qdev_get_prop_ptr(dev, prop);
+	strcpy(ptr->hostpath, str);
+	return (0);
 }
 
-static int print_hostaddr(DeviceState *dev, Property *prop, char *dest, size_t len)
+static int print_host_pci_path(DeviceState *dev, Property *prop, char *dest, size_t len)
 {
-    PCIHostDevice *ptr = qdev_get_prop_ptr(dev, prop);
-
-    return snprintf(dest, len, "%02x:%02x.%x", ptr->bus, ptr->dev, ptr->func);
+	PCIHostDevice *ptr = qdev_get_prop_ptr(dev, prop);
+	return snprintf(dest, len, "%s", ptr->hostpcipath);
 }
 
 PropertyInfo qdev_prop_hostaddr = {
-    .name  = "pci-hostaddr",
-    .type  = -1,
-    .size  = sizeof(PCIHostDevice),
-    .parse = parse_hostaddr,
-    .print = print_hostaddr,
+	.name  = "pci-hostaddr",
+	.type  = -1,
+	.size  = sizeof(PCIHostDevice),
+	.parse = parse_host_pci_path,
+	.print = print_host_pci_path,
 };
 
 static PCIDeviceInfo assign_info = {

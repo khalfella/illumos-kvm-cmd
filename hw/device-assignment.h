@@ -37,10 +37,7 @@
 #define PCI_DEVFN(slot, func)   ((((slot) & 0x1f) << 3) | ((func) & 0x07))
 
 typedef struct PCIHostDevice {
-    int seg;
-    int bus;
-    int dev;
-    int func;
+	char hostpcipath[MAXPATHLEN];
 } PCIHostDevice;
 
 typedef struct {
