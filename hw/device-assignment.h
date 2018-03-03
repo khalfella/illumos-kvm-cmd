@@ -37,28 +37,25 @@
 #define PCI_DEVFN(slot, func)   ((((slot) & 0x1f) << 3) | ((func) & 0x07))
 
 typedef struct PCIHostDevice {
-    int seg;
-    int bus;
-    int dev;
-    int func;
+	char upci_path[1024];
 } PCIHostDevice;
 
 typedef struct {
-    int type;           /* Memory or port I/O */
-    int valid;
-    uint32_t base_addr;
-    uint32_t size;    /* size of the region */
-    int resource_fd;
+    uint64_t flags;           /* Memory , port I/O, prefetch, valid */
+    uint64_t base_addr;
+    uint64_t size;    /* size of the region */
+    int rn;		/* region number */
+    int upci_fd;
 } PCIRegion;
 
 typedef struct {
-    uint8_t bus, dev, func; /* Bus inside domain, device and function */
+    /*uint8_t bus, dev, func; */ /* Bus inside domain, device and function */
     int irq;                /* IRQ number */
     uint16_t region_number; /* number of active regions */
 
     /* Port I/O or MMIO Regions */
     PCIRegion regions[PCI_NUM_REGIONS - 1];
-    int config_fd;
+    int upci_fd;
 } PCIDevRegions;
 
 typedef struct {
