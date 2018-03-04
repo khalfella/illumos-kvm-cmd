@@ -30,6 +30,10 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+
+#include <upci.h>
+
+
 #include "qemu-kvm.h"
 #include "hw.h"
 #include "pc.h"
@@ -60,12 +64,48 @@
 #endif
 
 
-
-
 static int
-upci_reg_rw(int fd, int reg, off_t off, size_t sz, char *buf, int write)
+upci_open(char *upci_path)
 {
 	return (-1);
+}
+
+static int
+upci_get_dev_prop(int fd, uint32_t *nr, uint64_t *flags)
+{
+	return (-1);
+}
+
+static int
+upci_get_reg_prop(int fd, int r, uint64_t *start, uint64_t *size,
+    uint64_t *flags)
+{
+	return (-1);
+}
+
+static uint16_t
+upci_get_vendor_id(int fd)
+{
+	return (0xffff);
+}
+
+static size_t
+upci_reg_rw(int fd, int reg, uint64_t off, char *buf, size_t sz, int write)
+{
+	return (-1);
+}
+
+static size_t
+upci_cfg_rw(int fd, uint64_t off, char *buff, size_t sz, int write)
+{
+	return upci_reg_rw(fd, -1, off, buff, sz, write);
+}
+
+static size_t
+upci_cfg_prw(int fd, uint64_t off, char *buff, size_t sz, int write)
+{
+	/* Implement this function to iteratively call ioctl indirectly */
+	return (0);
 }
 
 static void assigned_dev_load_option_rom(AssignedDevice *dev);
@@ -88,10 +128,10 @@ static uint32_t assigned_dev_ioport_rw(AssignedDevRegion *dev_region,
 	int r = dev_region->num;
 	int write = (val != NULL);
 
-	if (upci_reg_rw(fd, r, offset, len, (char *) (write ? val : &ret),
-	    write) != len) {
+	if (upci_reg_rw(fd, r, offset, (char *) (write ? val : &ret),
+	    len, write) != len) {
 		fprintf(stderr, "%s: failed in upci_reg_rw %s reg[%d]:%ld\n",
-		    __fund__, write ? "write" : "read", r, offset);
+		    __func__, write ? "write" : "read", r, offset);
 		exit(1);
 	}
 	DEBUG("in %s: op = %s reg=%d, len=%d\n",
@@ -140,7 +180,8 @@ static uint32_t slow_bar_readb(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 1, &r, 0) != 1) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	    (char *) &r, 1, 0) != 1) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -153,7 +194,8 @@ static uint32_t slow_bar_readw(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 2, &r, 0) != 2) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	    (char *) &r, 2, 0) != 2) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -166,7 +208,8 @@ static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 4, &r, 0) != 4) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	    (char *) &r, 4, 0) != 4) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -178,7 +221,8 @@ static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
 static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 1, &val, 1) != 1) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	    (char *) &val, 1, 1) != 1) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -189,7 +233,8 @@ static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 2, &val, 1) != 2) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	     (char *) &val, 2, 1) != 2) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -200,7 +245,8 @@ static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void slow_bar_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr, 4, &val, 1) != 4) {
+	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+	    (char *) &val, 4, 1) != 4) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
 		exit(1);
@@ -226,7 +272,6 @@ static void assigned_dev_iomem_map_slow(PCIDevice *pci_dev, int region_num,
 {
 	AssignedDevice *r_dev = container_of(pci_dev, AssignedDevice, dev);
 	AssignedDevRegion *region = &r_dev->v_addrs[region_num];
-	PCIRegion *real_region = &r_dev->real_device.regions[region_num];
 	int m;
 
 	DEBUG("%s", "slow map\n");
@@ -243,7 +288,6 @@ static void assigned_dev_ioport_map(PCIDevice *pci_dev, int region_num,
 {
     AssignedDevice *r_dev = container_of(pci_dev, AssignedDevice, dev);
     AssignedDevRegion *region = &r_dev->v_addrs[region_num];
-    CPUState *env;
 
     region->e_physbase = addr;
     region->e_size = size;
@@ -271,8 +315,8 @@ static uint32_t assigned_dev_pci_read(PCIDevice *d, int pos, int len)
 	uint32_t val = 0;
 	int fd = pci_dev->real_device.upci_fd;
 
-	if (upci_cfg_read(fd, post &val, len) != len) {
-		fprintf(stderr, "%s: pci_cfg_read failed\n", __func__);
+	if (upci_cfg_rw(fd, pos,  (char *) &val, len, 0) != len) {
+		fprintf(stderr, "%s: pci_cfg_rw failed\n", __func__);
 		exit(1);
 	}
 	return (val);
@@ -285,23 +329,13 @@ static uint8_t assigned_dev_pci_read_byte(PCIDevice *d, int pos)
 
 static void assigned_dev_pci_write(PCIDevice *d, int pos, uint32_t val, int len)
 {
-    AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
-    ssize_t ret;
-    int fd = pci_dev->real_device.config_fd;
+	AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
+	int fd = pci_dev->real_device.upci_fd;
 
-again:
-    ret = pwrite(fd, &val, len, pos);
-    if (ret != len) {
-	if ((ret < 0) && (errno == EINTR || errno == EAGAIN))
-	    goto again;
-
-	fprintf(stderr, "%s: pwrite failed, ret = %zd errno = %d\n",
-		__func__, ret, errno);
-
-	exit(1);
-    }
-
-    return;
+	if (upci_cfg_rw(fd, pos,  (char *) &val, len, 1) != len) {
+		fprintf(stderr, "%s: pci_cfg_rw failed\n", __func__);
+		exit(1);
+	}
 }
 
 static uint8_t pci_find_cap_offset(PCIDevice *d, uint8_t cap, uint8_t start)
@@ -336,47 +370,42 @@ static uint8_t pci_find_cap_offset(PCIDevice *d, uint8_t cap, uint8_t start)
 static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
                                           uint32_t val, int len)
 {
-    int fd;
-    ssize_t ret;
-    AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
+	int fd;
+	ssize_t ret;
+	AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
 
-    DEBUG("(%x.%x): address=%04x val=0x%08x len=%d\n",
-          ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
-          (uint16_t) address, val, len);
+	DEBUG("(%x.%x): address=%04x val=0x%08x len=%d\n",
+	    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+	    (uint16_t) address, val, len);
 
-    if (address >= PCI_CONFIG_HEADER_SIZE && d->config_map[address]) {
-        return assigned_device_pci_cap_write_config(d, address, val, len);
-    }
+	if (address >= PCI_CONFIG_HEADER_SIZE && d->config_map[address]) {
+		return assigned_device_pci_cap_write_config(d, address,
+		    val, len);
+	}
 
-    if (address == 0x4) {
-        pci_default_write_config(d, address, val, len);
-        /* Continue to program the card */
-    }
+	if (address == 0x4) {
+		pci_default_write_config(d, address, val, len);
+		/* Continue to program the card */
+	}
 
-    if ((address >= 0x10 && address <= 0x24) || address == 0x30 ||
-        address == 0x34 || address == 0x3c || address == 0x3d) {
-        /* used for update-mappings (BAR emulation) */
-        pci_default_write_config(d, address, val, len);
-        return;
-    }
+	if ((address >= 0x10 && address <= 0x24) || address == 0x30 ||
+	    address == 0x34 || address == 0x3c || address == 0x3d) {
+		/* used for update-mappings (BAR emulation) */
+		pci_default_write_config(d, address, val, len);
+		return;
+	}
 
-    DEBUG("NON BAR (%x.%x): address=%04x val=0x%08x len=%d\n",
-          ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
-          (uint16_t) address, val, len);
+	DEBUG("NON BAR (%x.%x): address=%04x val=0x%08x len=%d\n",
+	    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+	    (uint16_t) address, val, len);
 
-    fd = pci_dev->real_device.config_fd;
+	fd = pci_dev->real_device.upci_fd;
 
-again:
-    ret = pwrite(fd, &val, len, address);
-    if (ret != len) {
-	if ((ret < 0) && (errno == EINTR || errno == EAGAIN))
-	    goto again;
-
-	fprintf(stderr, "%s: pwrite failed, ret = %zd errno = %d\n",
-		__func__, ret, errno);
-
-	exit(1);
-    }
+	if (upci_cfg_rw(fd, address, (char *) &val, len, 1) != len) {
+		fprintf(stderr, "%s: upci_cfg_rw failed\n",
+		    __func__, ret, errno);
+		exit(1);
+	}
 }
 
 static uint32_t assigned_dev_pci_read_config(PCIDevice *d, uint32_t address,
@@ -384,7 +413,6 @@ static uint32_t assigned_dev_pci_read_config(PCIDevice *d, uint32_t address,
 {
     uint32_t val = 0;
     int fd;
-    ssize_t ret;
     AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
 
     if (address >= PCI_CONFIG_HEADER_SIZE && d->config_map[address]) {
@@ -407,19 +435,12 @@ static uint32_t assigned_dev_pci_read_config(PCIDevice *d, uint32_t address,
     if (address == 0xFC)
         goto do_log;
 
-    fd = pci_dev->real_device.config_fd;
+    fd = pci_dev->real_device.upci_fd;
 
-again:
-    ret = pread(fd, &val, len, address);
-    if (ret != len) {
-	if ((ret < 0) && (errno == EINTR || errno == EAGAIN))
-	    goto again;
-
-	fprintf(stderr, "%s: pread failed, ret = %zd errno = %d\n",
-		__func__, ret, errno);
-
-	exit(1);
-    }
+	if (upci_cfg_rw(fd, address, (char *) &val, len, 0) != len) {
+		fprintf(stderr, "%s: upci_cfg_rw failed\n", __func__);
+		exit(1);
+	}
 
 do_log:
     DEBUG("(%x.%x): address=%04x val=0x%08x len=%d\n",
@@ -543,48 +564,17 @@ static int get_real_device_id(const char *devpath, uint16_t *val)
     return get_real_id(devpath, "device", val);
 }
 
-static int
-upci_open(char *)
-{
-	return (-1);
-}
-
-static size_t
-pci_config_pread(int fd, char *buf, off_t offset, size_t sz)
-{
-	return (0);
-}
-
-static int
-upci_get_dev_prop(int fd, uint32_t *nr, uint32_t *flags)
-{
-	return (-1);
-}
-
-static int
-upci_get_reg_prop(int fd, int r, uint64_t *start, uint64_t *size,
-    uint64_t *flags)
-{
-	return (-1);
-}
-
-static uint16_t
-upci_get_vendor_id(int fd)
-{
-	return (0xffff);
-}
-
 static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 {
 
 	int r;
-	uint64_t start, size, flags;
+	uint64_t flags;
     	PCIRegion *rp;
     	PCIDevRegions *dev = &pci_dev->real_device;
 
 
 	size_t sz;
-	uint32_t nr, flags;
+	uint32_t nr;
 
     	dev->region_number = 0;
 
@@ -601,7 +591,7 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 
 
 	sz = pci_config_size(&pci_dev->dev);
-	if(upci_cfg_pread(dev->upci_fd, pci_dev->dev.config, 0, sz) != sz) {
+	if(upci_cfg_prw(dev->upci_fd, 0, (char *) pci_dev->dev.config, sz, 0) != sz) {
 		fprintf(stderr, "%s: failed to read pci cfg\n", __func__);
 		return (1);
 	}
@@ -638,7 +628,7 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 		}
 
 		if (rp->flags & UPCI_IO_REG_VALID) {
-			rp->nr = r;
+			rp->rn = r;
 			rp->upci_fd = dev->upci_fd;
 			pci_dev->v_addrs[r].region = rp;
 			DEBUG("region[%d] size x%"PRIx64
@@ -652,13 +642,15 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 
 
 	/* read and fill vendor ID */
-	if(upci_cfg_pread(dev->upci_fd, &pci_dev->dev.config[0], 0, 2) != 2) {
+	if(upci_cfg_rw(dev->upci_fd, 0, (char *) &pci_dev->dev.config[0],
+	    2, 0) != 2) {
 		fprintf(stderr, "%s: failed to read vendor id\n", __func__);
 		return (1);
 	}
 
 	/* read and fill device ID */
-	if(upci_cfg_pread(dev->upci_fd, &pci_dev->dev.config[2], 0, 2) != 2) {
+	if(upci_cfg_rw(dev->upci_fd, 2, (char *) &pci_dev->dev.config[2],
+	    2, 0) != 2) {
 		fprintf(stderr, "%s: failed to read device id\n", __func__);
 		return (1);
 	}
@@ -688,49 +680,6 @@ static uint32_t calc_assigned_dev_id(uint16_t seg, uint8_t bus, uint8_t devfn)
 
 static void assign_failed_examine(AssignedDevice *dev)
 {
-    char name[PATH_MAX], dir[PATH_MAX], driver[PATH_MAX] = {}, *ns;
-    uint16_t vendor_id, device_id;
-    int r;
-
-    sprintf(dir, "/sys/bus/pci/devices/%04x:%02x:%02x.%01x/",
-            dev->host.seg, dev->host.bus, dev->host.dev, dev->host.func);
-
-    sprintf(name, "%sdriver", dir);
-
-    r = readlink(name, driver, sizeof(driver));
-    if ((r <= 0) || r >= sizeof(driver) || !(ns = strrchr(driver, '/'))) {
-        goto fail;
-    }
-
-    ns++;
-
-    if (get_real_vendor_id(dir, &vendor_id) ||
-        get_real_device_id(dir, &device_id)) {
-        goto fail;
-    }
-
-    fprintf(stderr, "*** The driver '%s' is occupying your device "
-                    "%04x:%02x:%02x.%x.\n",
-            ns, dev->host.seg, dev->host.bus, dev->host.dev, dev->host.func);
-    fprintf(stderr, "***\n");
-    fprintf(stderr, "*** You can try the following commands to free it:\n");
-    fprintf(stderr, "***\n");
-    fprintf(stderr, "*** $ echo \"%04x %04x\" > /sys/bus/pci/drivers/pci-stub/"
-                    "new_id\n", vendor_id, device_id);
-    fprintf(stderr, "*** $ echo \"%04x:%02x:%02x.%x\" > /sys/bus/pci/drivers/"
-                    "%s/unbind\n",
-            dev->host.seg, dev->host.bus, dev->host.dev, dev->host.func, ns);
-    fprintf(stderr, "*** $ echo \"%04x:%02x:%02x.%x\" > /sys/bus/pci/drivers/"
-                    "pci-stub/bind\n",
-            dev->host.seg, dev->host.bus, dev->host.dev, dev->host.func);
-    fprintf(stderr, "*** $ echo \"%04x %04x\" > /sys/bus/pci/drivers/pci-stub"
-                    "/remove_id\n", vendor_id, device_id);
-    fprintf(stderr, "***\n");
-
-    return;
-
-fail:
-    fprintf(stderr, "Couldn't find out why.\n");
 }
 
 static int assign_device(AssignedDevice *dev)
@@ -740,7 +689,6 @@ static int assign_device(AssignedDevice *dev)
 
 static int assign_irq(AssignedDevice *dev)
 {
-    struct kvm_assigned_irq assigned_irq_data;
     int irq, r = 0;
 
     /* Interrupt PIN 0 means don't use INTx */
@@ -1086,38 +1034,19 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
                                                  uint32_t address,
                                                  uint32_t val, int len)
 {
-    uint8_t cap_id = pci_dev->config_map[address];
+	uint8_t cap_id = pci_dev->config_map[address];
+	pci_default_write_config(pci_dev, address, val, len);
 
-    pci_default_write_config(pci_dev, address, val, len);
-    switch (cap_id) {
-#ifdef KVM_CAP_IRQ_ROUTING
-    case PCI_CAP_ID_MSI:
-#ifdef KVM_CAP_DEVICE_MSI
-        {
-            uint8_t cap = pci_find_capability(pci_dev, cap_id);
-            if (ranges_overlap(address - cap, len, PCI_MSI_FLAGS, 1)) {
-                assigned_dev_update_msi(pci_dev, cap + PCI_MSI_FLAGS);
-            }
-        }
-#endif
-        break;
+	switch (cap_id) {
+	case PCI_CAP_ID_MSI:
+	case PCI_CAP_ID_MSIX:
+		/* Here to do MSI later on */
+	break;
 
-    case PCI_CAP_ID_MSIX:
-#ifdef KVM_CAP_DEVICE_MSIX
-        {
-            uint8_t cap = pci_find_capability(pci_dev, cap_id);
-            if (ranges_overlap(address - cap, len, PCI_MSIX_FLAGS + 1, 1)) {
-                assigned_dev_update_msix(pci_dev, cap + PCI_MSIX_FLAGS);
-            }
-        }
-#endif
-        break;
-#endif
-
-    case PCI_CAP_ID_VPD:
-    case PCI_CAP_ID_VNDR:
-        assigned_dev_pci_write(pci_dev, address, val, len);
-        break;
+	case PCI_CAP_ID_VPD:
+	case PCI_CAP_ID_VNDR:
+		assigned_dev_pci_write(pci_dev, address, val, len);
+	break;
     }
 }
 
