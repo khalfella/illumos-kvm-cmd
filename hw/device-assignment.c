@@ -63,36 +63,75 @@
 #define DEBUG(fmt, ...) do { } while(0)
 #endif
 
+/* upci functions */
 
 static int
 upci_open(char *upci_path)
 {
-	return (-1);
+	int fd;
+	if (( fd = open(upci_path, O_RDWR)) == -1 ||
+	    ioctl(fd, UPCI_IOCTL_OPEN, NULL) != 0 ||
+	    ioctl(fd, UPCI_IOCTL_OPEN_REGS, NULL) != 0) {
+		fprintf(stderr, "%s: failed to open\"%s\"\n", __func__,
+		     upci_path);
+		exit(1);
+	}
+	return (fd);
 }
 
 static int
 upci_get_dev_prop(int fd, uint32_t *nr, uint64_t *flags)
 {
-	return (-1);
+	upci_dev_info_t di;
+	if (ioctl(fd, UPCI_IOCTL_DEV_INFO, &di) != 0) {
+		fprintf(stderr, "%s: failed\n", __func__);
+		return (-1);
+	}
+
+	*nr = di.di_nregs;
+	*flags = di.di_flags;
+	return (0);
 }
 
 static int
-upci_get_reg_prop(int fd, int r, uint64_t *start, uint64_t *size,
+upci_get_reg_prop(int fd, int reg, uint64_t *base, uint64_t *size,
     uint64_t *flags)
 {
-	return (-1);
-}
+	upci_reg_info_t ri;
 
-static uint16_t
-upci_get_vendor_id(int fd)
-{
-	return (0xffff);
+	ri.ri_region = reg;
+	if (ioctl(fd, UPCI_IOCTL_REG_INFO, &ri) != 0) {
+		fprintf(stderr, "%s: failed\n", __func__);
+		return (-1);
+	}
+	*base = ri.ri_base;
+	*size = ri.ri_size;
+	*flags = ri.ri_flags;
+	return (0);
 }
 
 static size_t
 upci_reg_rw(int fd, int reg, uint64_t off, char *buf, size_t sz, int write)
 {
-	return (-1);
+	upci_rw_cmd_t rw;
+
+	if (sz != 1 && sz != 2 && sz != 4 && sz != 8) {
+		fprintf(stderr, "%s: size not in (1, 2, 4, 8)\n", __func__);
+		return (0);
+	}
+
+	rw.rw_region = reg;
+	rw.rw_offset = off;
+	rw.rw_count = sz;
+	rw.rw_pdatain = (uintptr_t) buf;
+	rw.rw_pdataout = (uintptr_t) buf;
+
+	if (ioctl(fd, write ? UPCI_IOCTL_WRITE: UPCI_IOCTL_READ, &rw) != 0) {
+		fprintf(stderr, "%s: io error\n", __func__);
+		return (0);
+	}
+
+	return (sz);
 }
 
 static size_t
@@ -104,13 +143,30 @@ upci_cfg_rw(int fd, uint64_t off, char *buff, size_t sz, int write)
 static size_t
 upci_cfg_prw(int fd, uint64_t off, char *buff, size_t sz, int write)
 {
-	/* Implement this function to iteratively call ioctl indirectly */
-	return (0);
+	off_t cur = 0;
+	size_t bsz, osz = sz;
+	while (sz > 0) {
+		bsz  = (sz >= 4) ? 4 : ((sz >= 2) ? 2 : 1);
+		if (upci_cfg_rw(fd, off + cur, buff + cur, bsz, write) != bsz) {
+			fprintf(stderr, "%s: io error\n", __func__);
+			return (0);
+		}
+		cur += bsz;
+		sz -= bsz;
+	}
+	return (osz);
 }
+
+
+/* assigned_device_functions */
+
+
 
 static void assigned_dev_load_option_rom(AssignedDevice *dev);
 
+/*
 static void assigned_dev_unregister_msix_mmio(AssignedDevice *dev);
+*/
 
 static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
                                                  uint32_t address,
@@ -371,7 +427,6 @@ static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
                                           uint32_t val, int len)
 {
 	int fd;
-	ssize_t ret;
 	AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
 
 	DEBUG("(%x.%x): address=%04x val=0x%08x len=%d\n",
@@ -403,7 +458,7 @@ static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
 
 	if (upci_cfg_rw(fd, address, (char *) &val, len, 1) != len) {
 		fprintf(stderr, "%s: upci_cfg_rw failed\n",
-		    __func__, ret, errno);
+		    __func__);
 		exit(1);
 	}
 }
@@ -532,38 +587,6 @@ assigned_dev_register_regions(PCIRegion *io_regions,
 	return (0);
 }
 
-static int get_real_id(const char *devpath, const char *idname, uint16_t *val)
-{
-    FILE *f;
-    char name[128];
-    long id;
-
-    snprintf(name, sizeof(name), "%s%s", devpath, idname);
-    f = fopen(name, "r");
-    if (f == NULL) {
-        fprintf(stderr, "%s: %s: %m\n", __func__, name);
-        return -1;
-    }
-    if (fscanf(f, "%li\n", &id) == 1) {
-        *val = id;
-    } else {
-        return -1;
-    }
-    fclose(f);
-
-    return 0;
-}
-
-static int get_real_vendor_id(const char *devpath, uint16_t *val)
-{
-    return get_real_id(devpath, "vendor", val);
-}
-
-static int get_real_device_id(const char *devpath, uint16_t *val)
-{
-    return get_real_id(devpath, "device", val);
-}
-
 static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 {
 
@@ -665,22 +688,16 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 
 static QLIST_HEAD(, AssignedDevice) devs = QLIST_HEAD_INITIALIZER(devs);
 
+/*
 static void free_dev_irq_entries(AssignedDevice *dev)
 {
 }
+*/
 
 static void free_assigned_device(AssignedDevice *dev)
 {
 }
 
-static uint32_t calc_assigned_dev_id(uint16_t seg, uint8_t bus, uint8_t devfn)
-{
-    return (uint32_t)seg << 16 | (uint32_t)bus << 8 | (uint32_t)devfn;
-}
-
-static void assign_failed_examine(AssignedDevice *dev)
-{
-}
 
 static int assign_device(AssignedDevice *dev)
 {
@@ -1053,7 +1070,6 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
 static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
 {
 	AssignedDevice *dev = container_of(pci_dev, AssignedDevice, dev);
-	PCIRegion *pci_region = dev->real_device.regions;
 	int ret, pos;
 
 	/* Clear initial capabilities pointer and status copied from hw */
@@ -1249,6 +1265,7 @@ static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
     return 0;
 }
 
+/*
 static uint32_t msix_mmio_readl(void *opaque, target_phys_addr_t addr)
 {
     AssignedDevice *adev = opaque;
@@ -1260,19 +1277,25 @@ static uint32_t msix_mmio_readl(void *opaque, target_phys_addr_t addr)
 
     return val;
 }
+*/
 
+/*
 static uint32_t msix_mmio_readb(void *opaque, target_phys_addr_t addr)
 {
     return ((msix_mmio_readl(opaque, addr & ~3)) >>
             (8 * (addr & 3))) & 0xff;
 }
+*/
 
+/*
 static uint32_t msix_mmio_readw(void *opaque, target_phys_addr_t addr)
 {
     return ((msix_mmio_readl(opaque, addr & ~3)) >>
             (8 * (addr & 3))) & 0xffff;
 }
+*/
 
+/*
 static void msix_mmio_writel(void *opaque,
                              target_phys_addr_t addr, uint32_t val)
 {
@@ -1284,7 +1307,9 @@ static void msix_mmio_writel(void *opaque,
 		    addr, val);
     memcpy((void *)((char *)page + offset), &val, 4);
 }
+*/
 
+/*
 static void msix_mmio_writew(void *opaque,
                              target_phys_addr_t addr, uint32_t val)
 {
@@ -1298,15 +1323,21 @@ static void msix_mmio_writeb(void *opaque,
     msix_mmio_writel(opaque, addr & ~3,
                      (val & 0xff) << (8*(addr & 3)));
 }
+*/
 
+/*
 static CPUWriteMemoryFunc *msix_mmio_write[] = {
     msix_mmio_writeb,	msix_mmio_writew,	msix_mmio_writel
 };
 
+*/
+/*
 static CPUReadMemoryFunc *msix_mmio_read[] = {
     msix_mmio_readb,	msix_mmio_readw,	msix_mmio_readl
 };
+*/
 
+/*
 static int assigned_dev_register_msix_mmio(AssignedDevice *dev)
 {
     dev->msix_table_page = mmap(NULL, 0x1000,
@@ -1323,7 +1354,9 @@ static int assigned_dev_register_msix_mmio(AssignedDevice *dev)
                         DEVICE_NATIVE_ENDIAN);
     return 0;
 }
+*/
 
+/*
 static void assigned_dev_unregister_msix_mmio(AssignedDevice *dev)
 {
     if (!dev->msix_table_page)
@@ -1338,6 +1371,7 @@ static void assigned_dev_unregister_msix_mmio(AssignedDevice *dev)
     }
     dev->msix_table_page = NULL;
 }
+*/
 
 static const VMStateDescription vmstate_assigned_device = {
     .name = "pci-assign",

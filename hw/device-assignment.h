@@ -43,7 +43,7 @@ typedef struct PCIHostDevice {
 typedef struct {
     uint64_t flags;           /* Memory , port I/O, prefetch, valid */
     uint64_t base_addr;
-    uint64_t size;    /* size of the region */
+    size_t size;    /* size of the region */
     int rn;		/* region number */
     int upci_fd;
 } PCIRegion;
