@@ -131,6 +131,23 @@ upci_reg_rw(int fd, int reg, uint64_t off, char *buf, size_t sz, int write)
 		return (0);
 	}
 
+	unsigned char *ubuf = (unsigned char *) buf;
+	switch (sz) {
+		case 1:
+		printf("   [%s] reg = %d off = %ldd data = %x\n",
+		    write ? "W" : "R", reg, off, ubuf[0]);
+		break;
+		case 2:
+		printf("   [%s] reg = %d off = %ldd data = %x %x\n",
+		    write ? "W" : "R", reg, off, ubuf[0], ubuf[1]);
+		break;
+		case 4:
+		printf("   [%s] reg = %d off = %ldd data = %x %x %x %x\n",
+		    write ? "W" : "R", reg, off,
+		    ubuf[0], ubuf[1], ubuf[2], ubuf[3]);
+		break;
+	}
+
 	return (sz);
 }
 
@@ -429,16 +446,18 @@ static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
 	int fd;
 	AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
 
-	DEBUG("(%x.%x): address=%04x val=0x%08x len=%d\n",
-	    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+	printf("%s: (%x.%x): address=%04x val=0x%08x len=%d\n",
+	    __func__, ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
 	    (uint16_t) address, val, len);
 
 	if (address >= PCI_CONFIG_HEADER_SIZE && d->config_map[address]) {
+		printf("write goes to capability write\n");
 		return assigned_device_pci_cap_write_config(d, address,
 		    val, len);
 	}
 
 	if (address == 0x4) {
+		printf("setting the command register\n");
 		pci_default_write_config(d, address, val, len);
 		/* Continue to program the card */
 	}
@@ -446,10 +465,13 @@ static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
 	if ((address >= 0x10 && address <= 0x24) || address == 0x30 ||
 	    address == 0x34 || address == 0x3c || address == 0x3d) {
 		/* used for update-mappings (BAR emulation) */
+		printf("updating bar\n");
 		pci_default_write_config(d, address, val, len);
 		return;
 	}
 
+	/* Write is going straight to the device */
+	printf("write is going straight to the device\n");
 	DEBUG("NON BAR (%x.%x): address=%04x val=0x%08x len=%d\n",
 	    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
 	    (uint16_t) address, val, len);
@@ -469,6 +491,9 @@ static uint32_t assigned_dev_pci_read_config(PCIDevice *d, uint32_t address,
     uint32_t val = 0;
     int fd;
     AssignedDevice *pci_dev = container_of(d, AssignedDevice, dev);
+
+        printf("%s:(%x.%x): address=%04x val=0x%08x len=%d\n",
+              __func__, (d->devfn >> 3) & 0x1F, (d->devfn & 0x7), address, val, len);
 
     if (address >= PCI_CONFIG_HEADER_SIZE && d->config_map[address]) {
         val = assigned_device_pci_cap_read_config(d, address, len);
@@ -1058,10 +1083,12 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
 	case PCI_CAP_ID_MSI:
 	case PCI_CAP_ID_MSIX:
 		/* Here to do MSI later on */
+		printf("    [Not hitting] This is MSI write capid = %x\n", cap_id);
 	break;
 
 	case PCI_CAP_ID_VPD:
 	case PCI_CAP_ID_VNDR:
+		printf("    [Hitting] This is VPD/VNDR write capid = %x\n", cap_id);
 		assigned_dev_pci_write(pci_dev, address, val, len);
 	break;
     }
