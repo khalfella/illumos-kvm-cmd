@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 #include <upci.h>
 
@@ -77,6 +78,52 @@ upci_open(char *upci_path)
 		exit(1);
 	}
 	return (fd);
+}
+
+typedef struct puller_arg_s {
+	int	pa_upci_fd;
+	void	(*pa_msi_intr_cb) (void *, int);
+	void	*pa_cbarg;
+} puller_arg_t;
+
+static void *
+upci_msi_puller(void *arg)
+{
+	puller_arg_t *pa = (puller_arg_t *) arg;
+	upci_int_get_t ig;
+	while (1) {
+		ig.ig_type = UPCI_INTR_TYPE_MSI;
+		if (ioctl(pa->pa_upci_fd, UPCI_IOCTL_INT_GET, &ig) == 0) {
+			pa->pa_msi_intr_cb(pa->pa_cbarg, ig.ig_number);
+			fprintf(stderr, "%s: delivering msi interrupt\n",
+			    __func__);
+		} else {
+			fprintf(stderr, "%s: ioctl != 0 msi interrupt\n",
+			    __func__);
+		}
+	}
+
+	free(arg);
+	return (NULL);
+}
+
+static int
+upci_start_msi_puller(int fd, void (*msi_intr_cb) (void *, int), void *cbarg)
+{
+	pthread_t tid;
+	puller_arg_t *pa;
+
+	if((pa = malloc(sizeof(*pa))) == NULL) {
+		fprintf(stderr, "%s: Failed to allocate memory\n");
+		exit(1);
+	}
+
+	pa->pa_upci_fd = fd;
+	pa->pa_msi_intr_cb = msi_intr_cb;
+	pa->pa_cbarg = cbarg;
+	pthread_create(&tid, NULL, upci_msi_puller, pa);
+
+	return (0);
 }
 
 static int
@@ -811,6 +858,15 @@ void assigned_dev_update_irqs(void)
     }
 }
 
+static void
+assigned_dev_msi_intr_cb(void *arg, int vector)
+{
+	AssignedDevice *dev = (AssignedDevice *) arg;
+	fprintf(stderr, "%s: address = %X data = %x\n",
+	    dev->msi_address_lo, dev->msi_data);
+	stl_phys(dev->msi_address_lo, dev->msi_data);
+}
+
 static void assigned_dev_update_msi(PCIDevice *pci_dev, unsigned int ctrl_pos)
 {
 	int vcount;
@@ -831,6 +887,7 @@ static void assigned_dev_update_msi(PCIDevice *pci_dev, unsigned int ctrl_pos)
 		vcount = pci_get_word(pci_dev->config + pos + PCI_MSI_FLAGS);
 		vcount &= PCI_MSI_FLAGS_QSIZE;
 		vcount >>= 4;
+		vcount = 1 << vcount;
 	}
 
 	upci_msi_update(assigned_dev->real_device.upci_fd,
@@ -948,6 +1005,10 @@ static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
 		    PCI_CAP_ID_MSI, pos, 10)) < 0) {
 			return ret;
 		}
+
+		upci_start_msi_puller(dev->real_device.upci_fd,
+		    assigned_dev_msi_intr_cb,
+		    dev);
 
 		pci_set_word(pci_dev->config + pos + PCI_MSI_FLAGS,
 		    pci_get_word(pci_dev->config + pos + PCI_MSI_FLAGS) &
