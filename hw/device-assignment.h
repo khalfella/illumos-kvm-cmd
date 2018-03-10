@@ -87,6 +87,9 @@ typedef struct AssignedDevice {
     PCIDevRegions real_device;
     int run;
     int girq;
+	uint32_t msi_address_lo;
+	uint32_t msi_address_hi;
+	uint32_t msi_data;
 /*
     unsigned int h_segnr;
     unsigned char h_busnr;

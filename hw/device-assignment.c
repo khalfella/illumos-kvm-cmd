@@ -80,6 +80,23 @@ upci_open(char *upci_path)
 }
 
 static int
+upci_msi_update(int fd, int enable, int vcount)
+{
+	upci_int_update_t iu;
+
+	iu.iu_type = UPCI_INTR_TYPE_MSI;
+	iu.iu_enable = enable;
+	iu.iu_vcount = vcount;
+
+	if (ioctl(fd, UPCI_IOCTL_INT_UPDATE, &iu) != 0) {
+		fprintf(stderr, "%s: failed\n", __func__);
+		return (-1);
+	}
+
+	return (0);
+}
+
+static int
 upci_get_dev_prop(int fd, uint32_t *nr, uint64_t *flags)
 {
 	upci_dev_info_t di;
@@ -134,15 +151,15 @@ upci_reg_rw(int fd, int reg, uint64_t off, char *buf, size_t sz, int write)
 	unsigned char *ubuf = (unsigned char *) buf;
 	switch (sz) {
 		case 1:
-		printf("   [%s] reg = %d off = %ldd data = %x\n",
+		printf("   [%s] reg = %d off = %X data = %x\n",
 		    write ? "W" : "R", reg, off, ubuf[0]);
 		break;
 		case 2:
-		printf("   [%s] reg = %d off = %ldd data = %x %x\n",
+		printf("   [%s] reg = %d off = %X data = %x %x\n",
 		    write ? "W" : "R", reg, off, ubuf[0], ubuf[1]);
 		break;
 		case 4:
-		printf("   [%s] reg = %d off = %ldd data = %x %x %x %x\n",
+		printf("   [%s] reg = %d off = %X data = %x %x %x %x\n",
 		    write ? "W" : "R", reg, off,
 		    ubuf[0], ubuf[1], ubuf[2], ubuf[3]);
 		break;
@@ -794,221 +811,32 @@ void assigned_dev_update_irqs(void)
     }
 }
 
-#ifdef KVM_CAP_IRQ_ROUTING
-
-#ifdef KVM_CAP_DEVICE_MSI
 static void assigned_dev_update_msi(PCIDevice *pci_dev, unsigned int ctrl_pos)
 {
-    struct kvm_assigned_irq assigned_irq_data;
-    AssignedDevice *assigned_dev = container_of(pci_dev, AssignedDevice, dev);
-    uint8_t ctrl_byte = pci_dev->config[ctrl_pos];
-    int r;
+	int vcount;
+	uint8_t ctrl_byte;
+    	AssignedDevice *assigned_dev;
 
-    memset(&assigned_irq_data, 0, sizeof assigned_irq_data);
-    assigned_irq_data.assigned_dev_id  =
-        calc_assigned_dev_id(assigned_dev->h_segnr, assigned_dev->h_busnr,
-                (uint8_t)assigned_dev->h_devfn);
+	ctrl_byte = pci_dev->config[ctrl_pos];
+	assigned_dev = container_of(pci_dev, AssignedDevice, dev);
+	vcount = 0;
 
-    /* Some guests gratuitously disable MSI even if they're not using it,
-     * try to catch this by only deassigning irqs if the guest is using
-     * MSI or intends to start. */
-    if ((assigned_dev->irq_requested_type & KVM_DEV_IRQ_GUEST_MSI) ||
-        (ctrl_byte & PCI_MSI_FLAGS_ENABLE)) {
+	if (ctrl_byte & PCI_MSI_FLAGS_ENABLE) {
+		int pos = ctrl_pos - PCI_MSI_FLAGS;
+		assigned_dev->msi_address_lo =
+		    pci_get_long(pci_dev->config + pos + PCI_MSI_ADDRESS_LO);
+		assigned_dev->msi_address_hi = 0;
+		assigned_dev->msi_data =
+		    pci_get_word(pci_dev->config + pos + PCI_MSI_DATA_32);
+		vcount = pci_get_word(pci_dev->config + pos + PCI_MSI_FLAGS);
+		vcount &= PCI_MSI_FLAGS_QSIZE;
+		vcount >>= 4;
+	}
 
-        assigned_irq_data.flags = assigned_dev->irq_requested_type;
-        free_dev_irq_entries(assigned_dev);
-        r = kvm_deassign_irq(kvm_context, &assigned_irq_data);
-        /* -ENXIO means no assigned irq */
-        if (r && r != -ENXIO)
-            perror("assigned_dev_update_msi: deassign irq");
-
-        assigned_dev->irq_requested_type = 0;
-    }
-
-    if (ctrl_byte & PCI_MSI_FLAGS_ENABLE) {
-        int pos = ctrl_pos - PCI_MSI_FLAGS;
-        assigned_dev->entry = calloc(1, sizeof(struct kvm_irq_routing_entry));
-        if (!assigned_dev->entry) {
-            perror("assigned_dev_update_msi: ");
-            return;
-        }
-        assigned_dev->entry->u.msi.address_lo =
-            pci_get_long(pci_dev->config + pos + PCI_MSI_ADDRESS_LO);
-        assigned_dev->entry->u.msi.address_hi = 0;
-        assigned_dev->entry->u.msi.data =
-            pci_get_word(pci_dev->config + pos + PCI_MSI_DATA_32);
-        assigned_dev->entry->type = KVM_IRQ_ROUTING_MSI;
-        r = kvm_get_irq_route_gsi();
-        if (r < 0) {
-            perror("assigned_dev_update_msi: kvm_get_irq_route_gsi");
-            return;
-        }
-        assigned_dev->entry->gsi = r;
-
-        kvm_add_routing_entry(assigned_dev->entry);
-        if (kvm_commit_irq_routes() < 0) {
-            perror("assigned_dev_update_msi: kvm_commit_irq_routes");
-            assigned_dev->cap.state &= ~ASSIGNED_DEVICE_MSI_ENABLED;
-            return;
-        }
-	assigned_dev->irq_entries_nr = 1;
-
-        assigned_irq_data.guest_irq = assigned_dev->entry->gsi;
-	assigned_irq_data.flags = KVM_DEV_IRQ_HOST_MSI | KVM_DEV_IRQ_GUEST_MSI;
-        if (kvm_assign_irq(kvm_context, &assigned_irq_data) < 0)
-            perror("assigned_dev_enable_msi: assign irq");
-
-        assigned_dev->girq = -1;
-        assigned_dev->irq_requested_type = assigned_irq_data.flags;
-    } else {
-        assign_irq(assigned_dev);
-    }
+	upci_msi_update(assigned_dev->real_device.upci_fd,
+	    ctrl_byte & PCI_MSI_FLAGS_ENABLE ? 1 : 0,
+	    vcount);
 }
-#endif
-
-#ifdef KVM_CAP_DEVICE_MSIX
-static int assigned_dev_update_msix_mmio(PCIDevice *pci_dev)
-{
-    AssignedDevice *adev = container_of(pci_dev, AssignedDevice, dev);
-    uint16_t entries_nr = 0, entries_max_nr;
-    int pos = 0, i, r = 0;
-    uint32_t msg_addr, msg_upper_addr, msg_data, msg_ctrl;
-    struct kvm_assigned_msix_nr msix_nr;
-    struct kvm_assigned_msix_entry msix_entry;
-    void *va = adev->msix_table_page;
-
-    pos = pci_find_capability(pci_dev, PCI_CAP_ID_MSIX);
-
-    entries_max_nr = *(uint16_t *)(pci_dev->config + pos + 2);
-    entries_max_nr &= PCI_MSIX_TABSIZE;
-    entries_max_nr += 1;
-
-    /* Get the usable entry number for allocating */
-    for (i = 0; i < entries_max_nr; i++) {
-        memcpy(&msg_ctrl, va + i * 16 + 12, 4);
-        memcpy(&msg_data, va + i * 16 + 8, 4);
-        /* Ignore unused entry even it's unmasked */
-        if (msg_data == 0)
-            continue;
-        entries_nr ++;
-    }
-
-    if (entries_nr == 0) {
-        fprintf(stderr, "MSI-X entry number is zero!\n");
-        return -EINVAL;
-    }
-    msix_nr.assigned_dev_id = calc_assigned_dev_id(adev->h_segnr, adev->h_busnr,
-                                          (uint8_t)adev->h_devfn);
-    msix_nr.entry_nr = entries_nr;
-    r = kvm_assign_set_msix_nr(kvm_context, &msix_nr);
-    if (r != 0) {
-        fprintf(stderr, "fail to set MSI-X entry number for MSIX! %s\n",
-			strerror(-r));
-        return r;
-    }
-
-    free_dev_irq_entries(adev);
-    adev->irq_entries_nr = entries_nr;
-    adev->entry = calloc(entries_nr, sizeof(struct kvm_irq_routing_entry));
-    if (!adev->entry) {
-        perror("assigned_dev_update_msix_mmio: ");
-        return -errno;
-    }
-
-    msix_entry.assigned_dev_id = msix_nr.assigned_dev_id;
-    entries_nr = 0;
-    for (i = 0; i < entries_max_nr; i++) {
-        if (entries_nr >= msix_nr.entry_nr)
-            break;
-        memcpy(&msg_ctrl, va + i * 16 + 12, 4);
-        memcpy(&msg_data, va + i * 16 + 8, 4);
-        if (msg_data == 0)
-            continue;
-
-        memcpy(&msg_addr, va + i * 16, 4);
-        memcpy(&msg_upper_addr, va + i * 16 + 4, 4);
-
-        r = kvm_get_irq_route_gsi();
-        if (r < 0)
-            return r;
-
-        adev->entry[entries_nr].gsi = r;
-        adev->entry[entries_nr].type = KVM_IRQ_ROUTING_MSI;
-        adev->entry[entries_nr].flags = 0;
-        adev->entry[entries_nr].u.msi.address_lo = msg_addr;
-        adev->entry[entries_nr].u.msi.address_hi = msg_upper_addr;
-        adev->entry[entries_nr].u.msi.data = msg_data;
-        DEBUG("MSI-X data 0x%x, MSI-X addr_lo 0x%x\n!", msg_data, msg_addr);
-	kvm_add_routing_entry(&adev->entry[entries_nr]);
-
-        msix_entry.gsi = adev->entry[entries_nr].gsi;
-        msix_entry.entry = i;
-        r = kvm_assign_set_msix_entry(kvm_context, &msix_entry);
-        if (r) {
-            fprintf(stderr, "fail to set MSI-X entry! %s\n", strerror(-r));
-            break;
-        }
-        DEBUG("MSI-X entry gsi 0x%x, entry %d\n!",
-                msix_entry.gsi, msix_entry.entry);
-        entries_nr ++;
-    }
-
-    if (r == 0 && kvm_commit_irq_routes() < 0) {
-	    perror("assigned_dev_update_msix_mmio: kvm_commit_irq_routes");
-	    return -EINVAL;
-    }
-
-    return r;
-}
-
-static void assigned_dev_update_msix(PCIDevice *pci_dev, unsigned int ctrl_pos)
-{
-    struct kvm_assigned_irq assigned_irq_data;
-    AssignedDevice *assigned_dev = container_of(pci_dev, AssignedDevice, dev);
-    uint16_t *ctrl_word = (uint16_t *)(pci_dev->config + ctrl_pos);
-    int r;
-
-    memset(&assigned_irq_data, 0, sizeof assigned_irq_data);
-    assigned_irq_data.assigned_dev_id  =
-            calc_assigned_dev_id(assigned_dev->h_segnr, assigned_dev->h_busnr,
-                    (uint8_t)assigned_dev->h_devfn);
-
-    /* Some guests gratuitously disable MSIX even if they're not using it,
-     * try to catch this by only deassigning irqs if the guest is using
-     * MSIX or intends to start. */
-    if ((assigned_dev->irq_requested_type & KVM_DEV_IRQ_GUEST_MSIX) ||
-        (*ctrl_word & PCI_MSIX_ENABLE)) {
-
-        assigned_irq_data.flags = assigned_dev->irq_requested_type;
-        free_dev_irq_entries(assigned_dev);
-        r = kvm_deassign_irq(kvm_context, &assigned_irq_data);
-        /* -ENXIO means no assigned irq */
-        if (r && r != -ENXIO)
-            perror("assigned_dev_update_msix: deassign irq");
-
-        assigned_dev->irq_requested_type = 0;
-    }
-
-    if (*ctrl_word & PCI_MSIX_ENABLE) {
-        assigned_irq_data.flags = KVM_DEV_IRQ_HOST_MSIX |
-                                  KVM_DEV_IRQ_GUEST_MSIX;
-
-        if (assigned_dev_update_msix_mmio(pci_dev) < 0) {
-            perror("assigned_dev_update_msix_mmio");
-            return;
-        }
-        if (kvm_assign_irq(kvm_context, &assigned_irq_data) < 0) {
-            perror("assigned_dev_enable_msix: assign irq");
-            return;
-        }
-        assigned_dev->girq = -1;
-        assigned_dev->irq_requested_type = assigned_irq_data.flags;
-    } else {
-        assign_irq(assigned_dev);
-    }
-}
-#endif
-#endif
 
 /* There can be multiple VNDR capabilities per device, we need to find the
  * one that starts closet to the given address without going over. */
@@ -1082,8 +910,11 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
 	switch (cap_id) {
 	case PCI_CAP_ID_MSI:
 	case PCI_CAP_ID_MSIX:
-		/* Here to do MSI later on */
 		printf("    [Not hitting] This is MSI write capid = %x\n", cap_id);
+		uint8_t cap = pci_find_capability(pci_dev, cap_id);
+		if (ranges_overlap(address - cap, len, PCI_MSI_FLAGS, 1)) {
+			assigned_dev_update_msi(pci_dev, cap + PCI_MSI_FLAGS);
+		}
 	break;
 
 	case PCI_CAP_ID_VPD:
