@@ -135,6 +135,9 @@ upci_msi_update(int fd, int enable, int vcount)
 	iu.iu_enable = enable;
 	iu.iu_vcount = vcount;
 
+	fprintf(stderr, "%s: enable = %d, count = %d\n",
+	    __func__, enable, vcount);
+
 	if (ioctl(fd, UPCI_IOCTL_INT_UPDATE, &iu) != 0) {
 		fprintf(stderr, "%s: failed\n", __func__);
 		return (-1);
@@ -863,7 +866,7 @@ assigned_dev_msi_intr_cb(void *arg, int vector)
 {
 	AssignedDevice *dev = (AssignedDevice *) arg;
 	fprintf(stderr, "%s: address = %X data = %x\n",
-	    dev->msi_address_lo, dev->msi_data);
+	    __func__, dev->msi_address_lo, dev->msi_data);
 	stl_phys(dev->msi_address_lo, dev->msi_data);
 }
 
@@ -966,12 +969,15 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
 
 	switch (cap_id) {
 	case PCI_CAP_ID_MSI:
-	case PCI_CAP_ID_MSIX:
-		printf("    [Not hitting] This is MSI write capid = %x\n", cap_id);
+		printf("This is MSI write capid = %x\n", cap_id);
 		uint8_t cap = pci_find_capability(pci_dev, cap_id);
 		if (ranges_overlap(address - cap, len, PCI_MSI_FLAGS, 1)) {
 			assigned_dev_update_msi(pci_dev, cap + PCI_MSI_FLAGS);
 		}
+	break;
+	case PCI_CAP_ID_MSIX:
+		fprintf(stderr, "MSIX is not supported yet!\n");
+		exit(1);
 	break;
 
 	case PCI_CAP_ID_VPD:
