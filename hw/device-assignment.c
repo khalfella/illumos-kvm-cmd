@@ -82,8 +82,8 @@ upci_open(char *upci_path)
 
 typedef struct puller_arg_s {
 	int	pa_upci_fd;
-	void	(*pa_msi_intr_cb) (void *, int);
-	void	*pa_cbarg;
+	void	(*pa_intr_cb) (void *, int);
+	void	*pa_cb_arg;
 } puller_arg_t;
 
 static void *
@@ -94,7 +94,7 @@ upci_msi_puller(void *arg)
 	while (1) {
 		ig.ig_type = UPCI_INTR_TYPE_MSI;
 		if (ioctl(pa->pa_upci_fd, UPCI_IOCTL_INT_GET, &ig) == 0) {
-			pa->pa_msi_intr_cb(pa->pa_cbarg, ig.ig_number);
+			pa->pa_intr_cb(pa->pa_cb_arg, ig.ig_number);
 			fprintf(stderr, "%s: delivering msi interrupt\n",
 			    __func__);
 		} else {
@@ -107,24 +107,68 @@ upci_msi_puller(void *arg)
 	return (NULL);
 }
 
-static int
-upci_start_msi_puller(int fd, void (*msi_intr_cb) (void *, int), void *cbarg)
+static void *
+upci_intx_puller(void *arg)
 {
-	pthread_t tid;
-	puller_arg_t *pa;
+	puller_arg_t *pa = (puller_arg_t *) arg;
+	upci_int_get_t ig;
+	while (1) {
+		ig.ig_type = UPCI_INTR_TYPE_FIXED;
+		if (ioctl(pa->pa_upci_fd, UPCI_IOCTL_INT_GET, &ig) == 0) {
+			pa->pa_intr_cb(pa->pa_cb_arg, 0);
+			fprintf(stderr, "%s: delivering intx interrupt\n",
+			    __func__);
+		} else {
+			fprintf(stderr, "%s: ioctl != 0 intx interrupt\n",
+			    __func__);
+		}
+	}
 
-	if((pa = malloc(sizeof(*pa))) == NULL) {
+	free(arg);
+	return (NULL);
+}
+
+static int
+upci_start_intx_puller(int fd, void (*intx_intr_cb) (void *, int),
+    void *intx_cb_arg)
+{
+	pthread_t intx_tid;
+	puller_arg_t *intx_pa;
+
+	if ((intx_pa = malloc(sizeof(*intx_pa))) == NULL) {
 		fprintf(stderr, "%s: Failed to allocate memory\n");
 		exit(1);
 	}
 
-	pa->pa_upci_fd = fd;
-	pa->pa_msi_intr_cb = msi_intr_cb;
-	pa->pa_cbarg = cbarg;
-	pthread_create(&tid, NULL, upci_msi_puller, pa);
+	intx_pa->pa_upci_fd = fd;
+	intx_pa->pa_intr_cb =  intx_intr_cb;
+	intx_pa->pa_cb_arg = intx_cb_arg;
+
+	pthread_create(&intx_tid, NULL, upci_intx_puller, intx_pa);
 
 	return (0);
 }
+
+static int
+upci_start_msi_puller(int fd, void (*msi_intr_cb) (void *, int),
+    void *msi_cb_arg ) {
+
+	pthread_t msi_tid;
+	puller_arg_t *msi_pa;
+
+	if((msi_pa = malloc(sizeof(*msi_pa))) == NULL) {
+		fprintf(stderr, "%s: Failed to allocate memory\n");
+		exit(1);
+	}
+
+	msi_pa->pa_upci_fd = fd;
+	msi_pa->pa_intr_cb = msi_intr_cb;
+	msi_pa->pa_cb_arg = msi_cb_arg;
+
+	pthread_create(&msi_tid, NULL, upci_msi_puller, msi_pa);
+	return (0);
+}
+
 
 static int
 upci_msi_update(int fd, int enable, int vcount)
@@ -862,6 +906,15 @@ void assigned_dev_update_irqs(void)
 }
 
 static void
+assigned_dev_intx_intr_cb(void *arg, int dummy)
+{
+	/*
+	 * AssignedDevice *dev = (AssignedDevice *) arg;
+	 */
+	fprintf(stderr, "%s, fired\n");
+}
+
+static void
 assigned_dev_msi_intr_cb(void *arg, int vector)
 {
 	AssignedDevice *dev = (AssignedDevice *) arg;
@@ -1378,6 +1431,8 @@ static int assigned_initfn(struct PCIDevice *pci_dev)
             goto assigned_out;
 	* No MSI-X for now
 	*/
+	upci_start_intx_puller(dev->real_device.upci_fd,
+	    assigned_dev_intx_intr_cb, dev);
 
     assigned_dev_load_option_rom(dev);
     QLIST_INSERT_HEAD(&devs, dev, next);
