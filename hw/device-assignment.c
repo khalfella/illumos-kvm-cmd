@@ -191,6 +191,26 @@ upci_msi_update(int fd, int enable, int vcount)
 }
 
 static int
+upci_intx_update(int fd, int enable)
+{
+	upci_int_update_t iu;
+
+	iu.iu_type = UPCI_INTR_TYPE_FIXED;
+	iu.iu_enable = enable;
+	iu.iu_vcount = 0;
+
+	fprintf(stderr, "%s: enable = %d\n", __func__, enable);
+
+	if (ioctl(fd, UPCI_IOCTL_INT_UPDATE, &iu) != 0) {
+		fprintf(stderr, "%s: failed\n", __func__);
+		return (-1);
+	}
+
+	return (0);
+}
+
+
+static int
 upci_get_dev_prop(int fd, uint32_t *nr, uint64_t *flags)
 {
 	upci_dev_info_t di;
@@ -551,6 +571,8 @@ static uint8_t pci_find_cap_offset(PCIDevice *d, uint8_t cap, uint8_t start)
     return 0;
 }
 
+static int assign_irq(AssignedDevice *dev);
+
 static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
                                           uint32_t val, int len)
 {
@@ -578,6 +600,10 @@ static void assigned_dev_pci_write_config(PCIDevice *d, uint32_t address,
 		/* used for update-mappings (BAR emulation) */
 		printf("updating bar\n");
 		pci_default_write_config(d, address, val, len);
+
+		/* update gues irq if necessary */
+		if (address == 0x3c || address == 0x3d)
+			assign_irq(pci_dev);
 		return;
 	}
 
@@ -842,28 +868,20 @@ static int assign_device(AssignedDevice *dev)
 
 static int assign_irq(AssignedDevice *dev)
 {
-    int irq, r = 0;
-
-    /* Interrupt PIN 0 means don't use INTx */
-    if (assigned_dev_pci_read_byte(&dev->dev, PCI_INTERRUPT_PIN) == 0)
-        return 0;
-
-    irq = pci_map_irq(&dev->dev, dev->intpin);
-    irq = piix_get_irq(irq);
+	int irq;
 
 
-    if (dev->girq == irq)
-        return r;
+	/* Interrupt PIN 0 means don't use INTx */
+	if (assigned_dev_pci_read_byte(&dev->dev, PCI_INTERRUPT_PIN) == 0) {
+		upci_intx_update(dev->real_device.upci_fd, 0);
+		return 0;
+	}
 
-	/* Code to receive IRQ and pass it as GIRQ */
-	/* Not sure if this code is related to MSI interrupts */
+	irq = pci_map_irq(&dev->dev, dev->intpin);
+	dev->girq = piix_get_irq(irq);
+	upci_intx_update(dev->real_device.upci_fd, 1);
 
-	/*
-	 * A lot of code should go here for interrupts to work
-	 */
-
-    dev->girq = irq;
-    return r;
+    return (0);
 }
 
 static void deassign_device(AssignedDevice *dev)
@@ -908,10 +926,10 @@ void assigned_dev_update_irqs(void)
 static void
 assigned_dev_intx_intr_cb(void *arg, int dummy)
 {
-	/*
-	 * AssignedDevice *dev = (AssignedDevice *) arg;
-	 */
-	fprintf(stderr, "%s, fired\n");
+	AssignedDevice *dev = (AssignedDevice *) arg;
+	qemu_set_irq(dev->dev.irq[0], 1);
+	qemu_set_irq(dev->dev.irq[0], 0);
+	fprintf(stderr, "%s, intx fired qirq = %d\n", dev->girq);
 }
 
 static void
