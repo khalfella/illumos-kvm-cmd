@@ -869,6 +869,10 @@ static int assign_device(AssignedDevice *dev)
 static int assign_irq(AssignedDevice *dev)
 {
 	int irq;
+	/*
+	 * short circuit this for now
+	 */
+	return (0);
 
 
 	/* Interrupt PIN 0 means don't use INTx */
@@ -938,12 +942,13 @@ assigned_dev_msi_intr_cb(void *arg, int vector)
 	AssignedDevice *dev = (AssignedDevice *) arg;
 	fprintf(stderr, "%s: address = %X data = %x\n",
 	    __func__, dev->msi_address_lo, dev->msi_data);
-	stl_phys(dev->msi_address_lo, dev->msi_data);
+
+	kvm_set_irq(dev->entry->gsi, 1, NULL);
 }
 
 static void assigned_dev_update_msi(PCIDevice *pci_dev, unsigned int ctrl_pos)
 {
-	int vcount;
+	int vcount, gsi;
 	uint8_t ctrl_byte;
     	AssignedDevice *assigned_dev;
 
@@ -953,11 +958,36 @@ static void assigned_dev_update_msi(PCIDevice *pci_dev, unsigned int ctrl_pos)
 
 	if (ctrl_byte & PCI_MSI_FLAGS_ENABLE) {
 		int pos = ctrl_pos - PCI_MSI_FLAGS;
-		assigned_dev->msi_address_lo =
+
+		if (kvm_del_routing_entry(assigned_dev->entry) < 0) {
+			fprintf(stderr, "%s: failed to del irq entry\n");
+			exit(1);
+		}
+
+		assigned_dev->entry->u.msi.address_lo = 
 		    pci_get_long(pci_dev->config + pos + PCI_MSI_ADDRESS_LO);
-		assigned_dev->msi_address_hi = 0;
-		assigned_dev->msi_data =
+		assigned_dev->entry->u.msi.address_hi = 0;
+		assigned_dev->entry->u.msi.data = 
 		    pci_get_word(pci_dev->config + pos + PCI_MSI_DATA_32);
+		assigned_dev->entry->type = KVM_IRQ_ROUTING_MSI;
+
+		if ((gsi = kvm_get_irq_route_gsi()) < 0) {
+			fprintf(stderr, "%s: failed to get irq gsi\n");
+			exit(1);
+		}
+
+		assigned_dev->entry->gsi = gsi;
+
+		if (kvm_add_routing_entry(assigned_dev->entry) < 0) {
+			fprintf(stderr, "%s: failed to add irq entry\n");
+			exit(1);
+		}
+
+		if (kvm_commit_irq_routes() < 0) {
+			fprintf(stderr, "%s: failed to commit routes\n");
+			exit(1);
+		}
+
 		vcount = pci_get_word(pci_dev->config + pos + PCI_MSI_FLAGS);
 		vcount &= PCI_MSI_FLAGS_QSIZE;
 		vcount >>= 4;
@@ -1062,7 +1092,7 @@ static void assigned_device_pci_cap_write_config(PCIDevice *pci_dev,
 static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
 {
 	AssignedDevice *dev = container_of(pci_dev, AssignedDevice, dev);
-	int ret, pos;
+	int ret, pos, gsi;
 
 	/* Clear initial capabilities pointer and status copied from hw */
 	pci_set_byte(pci_dev->config + PCI_CAPABILITY_LIST, 0);
@@ -1100,6 +1130,23 @@ static int assigned_device_pci_cap_init(PCIDevice *pci_dev)
 		pci_set_long(pci_dev->wmask + pos + PCI_MSI_ADDRESS_LO,
 		    0xfffffffc);
 		pci_set_word(pci_dev->wmask + pos + PCI_MSI_DATA_32, 0xffff);
+
+		/* allocate one irq entry for now */
+		dev->entry = calloc(1, sizeof(struct kvm_irq_routing_entry));
+		dev->irq_entries_nr = 1;
+
+		/* Initialize the entry */
+		dev->entry->u.msi.address_lo = 0;
+		dev->entry->u.msi.address_hi = 0;
+		dev->entry->u.msi.data = 0;
+		dev->entry->type = KVM_IRQ_ROUTING_MSI;
+		if ((gsi = kvm_get_irq_route_gsi()) < 0) {
+			fprintf(stderr, "%s: failed to get irq gsi\n");
+			exit(1);
+		}
+
+		dev->entry->gsi = gsi;
+		kvm_add_routing_entry(dev->entry);
 	}
 
 	/*
