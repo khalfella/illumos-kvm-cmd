@@ -112,6 +112,13 @@ upci_intx_puller(void *arg)
 {
 	puller_arg_t *pa = (puller_arg_t *) arg;
 	upci_int_get_t ig;
+	sigset_t ss;
+
+	sigfillset(&ss);
+	sigaddset(&ss, SIGINT);
+	sigaddset(&ss, SIGQUIT);
+	pthread_sigmask(SIG_SETMASK, &ss, NULL);
+
 	while (1) {
 		ig.ig_type = UPCI_INTR_TYPE_FIXED;
 		if (ioctl(pa->pa_upci_fd, UPCI_IOCTL_INT_GET, &ig) == 0) {
@@ -155,6 +162,12 @@ upci_start_msi_puller(int fd, void (*msi_intr_cb) (void *, int),
 
 	pthread_t msi_tid;
 	puller_arg_t *msi_pa;
+	sigset_t ss;
+
+	sigfillset(&ss);
+	sigaddset(&ss, SIGINT);
+	sigaddset(&ss, SIGQUIT);
+	pthread_sigmask(SIG_SETMASK, &ss, NULL);
 
 	if((msi_pa = malloc(sizeof(*msi_pa))) == NULL) {
 		fprintf(stderr, "%s: Failed to allocate memory\n");
