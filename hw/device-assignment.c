@@ -45,6 +45,7 @@
 #include "monitor.h"
 #include "range.h"
 #include "sysemu.h"
+#include "xdma.h"
 
 /* From linux/ioport.h */
 #define IORESOURCE_IO       0x00000100  /* Resource type */
@@ -397,7 +398,13 @@ static uint32_t slow_bar_readb(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
-	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		return xdma_slow_bar_readb(opaque, addr);
+	}
+
+	if(upci_reg_rw(d->region->upci_fd, d->num, addr,
 	    (char *) &r, 1, 0) != 1) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
 		    __func__, d->num, addr);
@@ -411,6 +418,12 @@ static uint32_t slow_bar_readw(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		return xdma_slow_bar_readw(opaque, addr);
+	}
+
 	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
 	    (char *) &r, 2, 0) != 2) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
@@ -425,6 +438,13 @@ static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
 {
 	AssignedDevRegion *d = opaque;
 	uint32_t r = 0;
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		return xdma_slow_bar_readl(opaque, addr);
+	}
+
+
 	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
 	    (char *) &r, 4, 0) != 4) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
@@ -438,6 +458,13 @@ static uint32_t slow_bar_readl(void *opaque, target_phys_addr_t addr)
 static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		xdma_slow_bar_writeb(opaque, addr, val);
+		return;
+	}
+
 	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
 	    (char *) &val, 1, 1) != 1) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
@@ -450,6 +477,13 @@ static void slow_bar_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		xdma_slow_bar_writew(d, addr, val);
+		return;
+	}
+
 	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
 	     (char *) &val, 2, 1) != 2) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
@@ -462,6 +496,13 @@ static void slow_bar_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void slow_bar_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
 	AssignedDevRegion *d = opaque;
+
+	/* Handle DMA region I/O */
+	if (d->region->flags & UPCI_IO_REG_VIR) {
+		xdma_slow_bar_writel(d, addr, val);
+		return;
+	}
+
 	if (upci_reg_rw(d->region->upci_fd, d->num, addr,
 	    (char *) &val, 4, 1) != 4) {
 		fprintf(stderr, "%s: error reading reg[%d]:%d\n",
@@ -838,6 +879,20 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 		}
 	}
 
+	/* Add dma virtual region */
+	fprintf(stderr, "Adding DMA virtual region\n");
+	rp = dev->regions + r;
+	rp->base_addr = 0x6400000; /* 100 MB (random value ) */
+	rp->size = 0x2000;	/* 8K */
+	rp->flags = UPCI_IO_REG_VALID | UPCI_IO_REG_VIR; /* mem no-prefetch */
+	rp->rn = r;
+	rp->upci_fd = dev->upci_fd;
+	pci_dev->v_addrs[r].region = rp;
+	DEBUG("dma virtual region[%d] size x%"PRIx64
+			    " base_addr 0x%"PRIx64" flags x%"PRIx64" \n",
+			    r, rp->size, rp->base_addr, rp->flags);
+
+	dev->region_number = r + 1;
 
 	/* read and fill vendor ID */
 	if(upci_cfg_rw(dev->upci_fd, 0, (char *) &pci_dev->dev.config[0],
@@ -852,8 +907,6 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 		fprintf(stderr, "%s: failed to read device id\n", __func__);
 		return (1);
 	}
-
-	dev->region_number = r;
 
 	/*
 	 * TODO: Check for virtual functions and report error

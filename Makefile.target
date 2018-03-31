@@ -239,14 +239,14 @@ obj-i386-y += acpi.o acpi_piix4.o
 
 obj-i386-y += pcspk.o i8254.o
 obj-i386-$(CONFIG_KVM_PIT) += i8254-kvm.o
-obj-i386-$(CONFIG_KVM_DEVICE_ASSIGNMENT) += device-assignment.o
+obj-i386-$(CONFIG_KVM_DEVICE_ASSIGNMENT) += device-assignment.o xdma.o
 
 # Hardware support
 obj-ia64-y += ide.o pckbd.o vga.o $(SOUND_HW) dma.o $(AUDIODRV)
 obj-ia64-y += fdc.o mc146818rtc.o serial.o i8259.o ipf.o
 obj-ia64-y += cirrus_vga.o parallel.o acpi.o piix_pci.o
 obj-ia64-y += usb-uhci.o
-obj-ia64-$(CONFIG_KVM_DEVICE_ASSIGNMENT) += device-assignment.o
+obj-ia64-$(CONFIG_KVM_DEVICE_ASSIGNMENT) += device-assignment.o xdma.o
 
 # shared objects
 obj-ppc-y = ppc.o
