@@ -23,7 +23,7 @@ typedef struct {
 } xdma_command_t;
 
 #define XDMA_BEGIN_OFFSET	0x2000		/* 8 KB */
-#define XDMA_REGION_SIZE	0x800000	/* 128 MB */
+#define XDMA_REGION_SIZE	0x800000	/* 8 MB */
 
 uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr);
 uint32_t xdma_slow_bar_readw(AssignedDevRegion *d, target_phys_addr_t addr);

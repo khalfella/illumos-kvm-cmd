@@ -1,3 +1,12 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <upci.h>
+
+#include <upci.h>
+
 #include "device-assignment.h"
 #include "xdma.h"
 
@@ -6,32 +15,34 @@
 #define XDMA_COMM_UINT32(d, addr) (*((uint32_t *) &(d)->xdma_command[(addr)]))
 
 
+#define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
+
 uint32_t xdma_alloc_coherent(AssignedDevRegion *d, xdma_command_t *cmd)
 {
-	uint64_t in_size, out_status, out_phys, out_virt;
+	upci_coherent_t ch;
+	uint64_t len;
 
-
-	in_size = cmd->in1;
-	fprintf(stderr, "%s: size = %llx\n", __func__, in_size);
-	if (in_size == 0 || d->xdma_offset + in_size > XDMA_REGION_SIZE) {
-		out_status = 1;
+	len = cmd->in1;
+	fprintf(stderr, "%s: length = %llx\n", __func__, len);
+	if (len  == 0 || d->xdma_offset + len > XDMA_REGION_SIZE) {
 		goto out;
 	}
 
-
-	/*
-	 * Here call upci to allocate
-	 * the coherent mapping. For
-	 * now just return an error.
-	 */
-	out_status = 1;
-	out_phys = 0;
-	out_virt = 0;
+	ch.ch_length = len;
+	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_ALLOC_COHERENT, &ch) == 0) {
+		cmd->status = 0;
+		cmd->out1 = ch.ch_cookie;
+		cmd->out2 = d->xdma_offset;
+		d->xdma_offset += ch.ch_length;
+		d->xdma_offset = ROUND_UP(d->xdma_offset, 4096);
+		fprintf(stderr, "%s: phy = %llx vir = %llx\n",
+		    __func__, cmd->out1, cmd->out2);
+		return (0);
+	}
 out:
-	cmd->status = out_status;
-	cmd->out1 = out_phys;
-	cmd->out2 = out_virt;
-	return (0);
+	fprintf(stderr, "%s: failed\n", __func__);
+	cmd->status = 1;
+	return (1);
 }
 
 uint32_t xdma_execute_command(AssignedDevRegion *d)
