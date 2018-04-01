@@ -20,21 +20,24 @@
 uint32_t xdma_alloc_coherent(AssignedDevRegion *d, xdma_command_t *cmd)
 {
 	upci_coherent_t ch;
-	uint64_t len;
+	uint64_t len, flags;
 
-	len = cmd->in1;
-	fprintf(stderr, "%s: length = %llx\n", __func__, len);
-	if (len  == 0 || d->xdma_offset + len > XDMA_REGION_SIZE) {
+	flags = cmd->in1;
+	len = cmd->in2;
+	fprintf(stderr, "%s: offset = %llx length = %llx flags = %llx\n",
+	    __func__, d->xdma_virtual, len, flags);
+	if (len  == 0 || d->xdma_virtual + len > XDMA_REGION_SIZE) {
 		goto out;
 	}
 
+	ch.ch_flags = flags;
 	ch.ch_length = len;
 	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_ALLOC_COHERENT, &ch) == 0) {
 		cmd->status = 0;
 		cmd->out1 = ch.ch_cookie;
-		cmd->out2 = d->xdma_offset;
-		d->xdma_offset += ch.ch_length;
-		d->xdma_offset = ROUND_UP(d->xdma_offset, 4096);
+		cmd->out2 = d->xdma_virtual;
+		d->xdma_virtual += ch.ch_length;
+		d->xdma_virtual = ROUND_UP(d->xdma_virtual, 4096);
 		fprintf(stderr, "%s: phy = %llx vir = %llx\n",
 		    __func__, cmd->out1, cmd->out2);
 		return (0);

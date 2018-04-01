@@ -29,6 +29,9 @@
 #define __DEVICE_ASSIGNMENT_H__
 
 #include <sys/mman.h>
+#include <sys/list.h>
+
+
 #include "qemu-common.h"
 #include "qemu-queue.h"
 #include "pci.h"
@@ -68,7 +71,8 @@ typedef struct {
     int num;            /* our index within v_addrs[] */
     pcibus_t e_size;    /* emulated size of region in bytes */
     pcibus_t r_size;    /* real size of region in bytes */
-    uint64_t xdma_offset;
+    uint64_t xdma_virtual;
+    list_t xdma_ch_list;
     char xdma_command[128];
     PCIRegion *region;
 } AssignedDevRegion;
