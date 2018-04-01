@@ -4,4 +4,4 @@
 export CC=/home/khalfella/ws/smartos-live/proto.strap/usr/bin/gcc
 export CTFCONVERT=/home/khalfella/ctfconvert
 export CTFMERGE=/home/khalfella/ctfmerge
-export PATH=$PATH:/opt/local/bin
+export PATH=$PATH:/opt/local/bin:/opt/sunstudio12.1/bin

@@ -30,7 +30,7 @@ typedef struct xdma_ch_ent_s {
 	uint64_t	xh_flags;
 	uint64_t	xh_length;
 	uint64_t	xh_cookie;
-	uint64_t	xh_off;
+	uint64_t	xh_virtual;
 	list_node_t	xh_next;
 } xdma_ch_ent_t;
 

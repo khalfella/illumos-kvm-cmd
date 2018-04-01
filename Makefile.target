@@ -241,6 +241,8 @@ obj-i386-y += pcspk.o i8254.o
 obj-i386-$(CONFIG_KVM_PIT) += i8254-kvm.o
 obj-i386-$(CONFIG_KVM_DEVICE_ASSIGNMENT) += device-assignment.o xdma.o
 
+LIBS+=-lcmdutils
+
 # Hardware support
 obj-ia64-y += ide.o pckbd.o vga.o $(SOUND_HW) dma.o $(AUDIODRV)
 obj-ia64-y += fdc.o mc146818rtc.o serial.o i8259.o ipf.o
