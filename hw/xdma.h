@@ -5,10 +5,22 @@
 
 
 
+#define XDMA_COMM_OFFSET	0x00
 
-
-
-
+typedef struct {
+	uint64_t commnad;
+	uint64_t status;
+	uint64_t out1;
+	uint64_t out2;
+	uint64_t out3;
+	uint64_t in1;
+	uint64_t in2;
+	uint64_t in3;
+	uint64_t in4;
+	uint64_t in5;
+	uint64_t in6;
+	uint64_t in7;
+} xdma_command_t;
 
 #define XDMA_REGION_SIZE	0x800000	/* 128 MB */
 
