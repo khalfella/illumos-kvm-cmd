@@ -8,7 +8,7 @@
 #define XDMA_COMM_OFFSET	0x00
 
 typedef struct {
-	uint64_t commnad;
+	uint64_t command;
 	uint64_t status;
 	uint64_t out1;
 	uint64_t out2;
@@ -22,6 +22,7 @@ typedef struct {
 	uint64_t in7;
 } xdma_command_t;
 
+#define XDMA_BEGIN_OFFSET	0x2000		/* 8 KB */
 #define XDMA_REGION_SIZE	0x800000	/* 128 MB */
 
 uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr);
