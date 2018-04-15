@@ -8,32 +8,60 @@
 
 #define XDMA_COMM_OFFSET	0x00
 
-typedef struct {
-	uint64_t command;
-	uint64_t status;
-	uint64_t out1;
-	uint64_t out2;
-	uint64_t out3;
-	uint64_t in1;
-	uint64_t in2;
-	uint64_t in3;
-	uint64_t in4;
-	uint64_t in5;
-	uint64_t in6;
-	uint64_t in7;
-} xdma_command_t;
+/* xdma commands */
+#define XDMA_CMD_COMMAND_ALLOC		0x01	/* allocate new map */
+#define XDMA_CMD_COMMAND_REMOVE		0x02	/* remove an existing map */
+#define XDMA_CMD_COMMAND_INQUIRY	0x03	/* get map info */
+#define XDMA_CMD_COMMAND_SYNC		0x04	/* sync cpu/device map view */
+
+/* xdma command return status */
+#define	XDMA_CMD_STATUS_OK		0x00	/* We are good */
+#define	XDMA_CMD_STATUS_ER		0x01	/* Something wrong */
+
+/* xdma command map type */
+#define XDMA_CMD_MAP_TYPE_COH		0x01	/* coherent map */
+#define XDMA_CMD_MAP_TYPE_STR		0x02	/* streaming map */
+
+/* xdma map dir */
+#define XDMA_CMD_DIR_TO_DEVICE		0x01	/* TX */
+#define XDMA_CMD_DIR_FROM_DEVICE	0x02	/* RX */
+#define XDMA_CMD_DIR_BIDIRECTIONAL	0x03	/* TX/RX */
+
+typedef struct xdma_cmd_s {
+	uint64_t	xc_command;		/* alloc, rem, inq */
+	uint64_t	xc_status;		/* ok, error */
+	uint64_t	xc_type;		/* coherent, streaming */
+	uint64_t	xc_dir;			/* map direction */
+	uint64_t	xc_size;		/* map size */
+	uint64_t	xc_gx_off;		/* offset in xdma map */
+	uint64_t	xc_hx_phys;		/* cookie or dma_addr_t */
+
+	/* guest buffer for streaming dma */
+	uint64_t	xc_gb_vir;		/* guest buffer vir addr */
+	uint64_t	xc_gb_phys;		/* guest buffer phys addr */
+	uint64_t	xc_gb_off;		/* guest buffer map off */
+} xdma_cmd_t;
+
+#define XDMA_ENT_FLAGS_ACTIVE	0x00		/* Active map */
+#define XDMA_ENT_FLAGS_SHADOW	0x01		/* Shadow map */
+
+typedef struct xdma_ent_s {
+	uint64_t	xd_flags;		/* active/shadow map */
+	uint64_t	xd_type;		/* coherent or streaming */
+	uint64_t	xd_length;		/* map length/size */
+	uint64_t	xd_gx_off;		/* offset in xdma map */
+	uint64_t	xd_hx_phys;		/* cookie or dma_addr_t */
+
+	/* guest buffer */
+	uint64_t	xd_gb_vir;		/* guest buffer vir addr */
+	uint64_t	xd_gb_phys;		/* guest buffer phys addr */
+	uint64_t	xd_gb_off;		/* offset in guest buffer */
+} xdma_ent_t;
+
+
 
 #define XDMA_BEGIN_VIRTUAL	0x2000		/* 8 KB */
 #define XDMA_REGION_SIZE	0x800000	/* 8 MB */
-
-typedef struct xdma_ch_ent_s {
-	uint64_t	xh_flags;
-	uint64_t	xh_length;
-	uint64_t	xh_cookie;
-	uint64_t	xh_virtual;
-	list_node_t	xh_next;
-} xdma_ch_ent_t;
-
 uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr);
 uint32_t xdma_slow_bar_readw(AssignedDevRegion *d, target_phys_addr_t addr);
 uint32_t xdma_slow_bar_readl(AssignedDevRegion *d, target_phys_addr_t addr);

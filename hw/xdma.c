@@ -5,7 +5,9 @@
 #include <sys/stat.h>
 #include <upci.h>
 
-#include <upci.h>
+#include <sys/ddi.h>
+#include <sys/sunddi.h>
+
 
 #include "device-assignment.h"
 #include "xdma.h"
@@ -17,107 +19,151 @@
 
 #define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
 
-
-static uint32_t
-xdma_alloc_coherent(AssignedDevRegion *d, xdma_command_t *cmd)
+static xdma_ent_t *
+xdma_find_map(AssignedDevRegion *d, uint64_t gxoff, uint64_t hxphys)
 {
-	upci_coherent_t ch;
-	xdma_ch_ent_t *xhe;
-	uint64_t len, flags;
+	xdma_ent_t *xde;
+	for (xde = list_head(&d->xdma_list); xde != NULL;
+	    xde = list_next(&d->xdma_list, xde)) {
 
-	flags = cmd->in1;
-	len = cmd->in2;
-	fprintf(stderr, "%s: offset = %llx length = %llx flags = %llx\n",
-	    __func__, d->xdma_virtual, len, flags);
-	if (len  == 0 || d->xdma_virtual + len > XDMA_REGION_SIZE) {
-		goto out;
-	}
+		if (gxoff != 0 && gxoff >= xde->xd_gx_off &&
+		    gxoff < xde->xd_gx_off + xde->xd_length) {
+			return (xde);
+		}
 
-	ch.ch_flags = flags;
-	ch.ch_length = len;
-	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_ALLOC_COHERENT, &ch) == 0) {
-		cmd->status = 0;
-		cmd->out1 = ch.ch_cookie;
-		cmd->out2 = d->xdma_virtual;
-
-		xhe = qemu_malloc(sizeof (xdma_ch_ent_t));
-		xhe->xh_flags = flags;
-		xhe->xh_length = len;
-		xhe->xh_cookie = ch.ch_cookie;
-		xhe->xh_virtual = d->xdma_virtual;
-		list_insert_tail(&d->xdma_ch_list, xhe);
-
-		d->xdma_virtual += ch.ch_length;
-		d->xdma_virtual = ROUND_UP(d->xdma_virtual, 4096);
-		fprintf(stderr, "%s: phy = %llx vir = %llx\n",
-		    __func__, cmd->out1, cmd->out2);
-		return (0);
-	}
-out:
-	fprintf(stderr, "%s: failed\n", __func__);
-	cmd->status = 1;
-	return (1);
-}
-
-static uint32_t
-xdma_execute_command(AssignedDevRegion *d)
-{
-	xdma_command_t *cmd;
-
-	cmd =  (xdma_command_t *) d->xdma_command;
-
-	fprintf(stderr, "%s: command = %d\n", __func__, cmd->command);
-
-	switch (cmd->command) {
-		case 1:
-			xdma_alloc_coherent(d, cmd);
-		break;
-	}
-	return (0);
-}
-
-static xdma_ch_ent_t
-*xdma_find_coherent_map(AssignedDevRegion *d, uint64_t addr)
-{
-	xdma_ch_ent_t *xhe;
-	for (xhe = list_head(&d->xdma_ch_list); xhe != NULL;
-	    xhe = list_next(&d->xdma_ch_list, xhe)) {
-		if (addr >= xhe->xh_virtual &&
-		    addr < xhe->xh_virtual + xhe->xh_length)
-			return (xhe);
+		if (hxphys != 0 && hxphys >= xde->xd_hx_phys &&
+		    gxoff < xde->xd_hx_phys + xde->xd_length) {
+			return (xde);
+		}
 	}
 
 	return (NULL);
 }
 
 static uint32_t
+xdma_alloc_map(AssignedDevRegion *d, xdma_cmd_t *xc)
+{
+	upci_dma_t ud;
+	xdma_ent_t *xde;
+
+
+	fprintf(stderr, "%s: g_xdma_off = %llx type = %llx "
+	    "dir = %llx length = %llx g_xdma_off = %llx h_xdma_phys = %llx\n"
+	    "gb_vir = %llx gb_phys = %llx gb_off = %llx\n",
+	    __func__, d->xdma_virtual, xc->xc_type,
+	    xc->xc_dir, xc->xc_size, xc->xc_gx_off, xc->xc_hx_phys,
+	    xc->xc_gb_vir, xc->xc_gb_phys, xc->xc_gb_off);
+
+	/* make sure we have space for the new allocation */
+	if (xc->xc_size  == 0 ||
+	    d->xdma_cur_offset + xc->xc_size > XDMA_REGION_SIZE) {
+		goto out;
+	}
+
+
+	ud.ud_type = (xc->xc_type == XDMA_CMD_MAP_TYPE_COH) ?
+	    DDI_DMA_CONSISTENT : DDI_DMA_STREAMING;
+	ud.ud_length = xc->xc_size;
+	ud.ud_rwoff = 0;
+	ud.ud_host_phys = 0;
+	ud.ud_udata = 0;
+
+	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_ALLOC, &ud) == 0) {
+
+		xc->xc_status = XDMA_CMD_STATUS_OK;
+		xc->xc_gx_off = d->xdma_cur_offset;
+		xc->xc_hx_phys = ud.ud_host_phys;
+
+		xde = qemu_malloc(sizeof (xdma_ent_t));
+
+		xde->xd_flags = XDMA_ENT_FLAGS_ACTIVE;
+		xde->xd_type = xc->xc_type;
+		xde->xd_length = xc->xc_size;
+		xde->xd_gx_off = d->xdma_cur_offset;
+		xde->xd_hx_phys = ud.ud_host_phys;
+		xde->xd_gb_vir = xc->xc_gb_vir;
+		xde->xd_gb_phys = xc->xc_gb_phys;
+		xde->xd_gb_off = xc->xc_gb_off;
+
+		list_insert_tail(&d->xdma_list, xhe);
+
+		d->xdma_cur_offset += xde->xd_length;
+		d->xdma_cur_offset = ROUND_UP(d->xdma_cur_offset, 4096);
+		return (0);
+	}
+out:
+	fprintf(stderr, "%s: failed\n", __func__);
+	xc->xc_status = XDMA_CMD_STATUS_ER;
+	return (1);
+}
+
+static uint32_t
+xdma_remove_map(AssignedDevRegion *d, xdma_cmd_t *xc)
+{
+	fprintf(stderr, "%s: failed\n", __func__);
+	return (1);
+}
+
+static uint32_t
+xdma_inquiry_map(AssignedDevRegion *d, xdma_cmd_t *xc)
+{
+	fprintf(stderr, "%s: failed\n", __func__);
+	return (1);
+}
+
+static uint32_t
+xdma_sync_map(AssignedDevRegion *d, xdma_cmd_t *xc)
+{
+	fprintf(stderr, "%s: failed\n", __func__);
+	return (1);
+}
+
+static uint32_t
+xdma_execute_command(AssignedDevRegion *d)
+{
+	xdma_cmd_t *xc;
+
+	xc =  (xdma_cmd_t *) d->xdma_command;
+
+	fprintf(stderr, "%s: command = %d\n", __func__, xc->xc_command);
+
+	switch (xc->xc_command) {
+		case XDMA_CMD_COMMAND_ALLOC:
+			xdma_alloc_map(d, xc);
+		break;
+		case XDMA_CMD_COMMAND_REMOVE:
+			xdma_remove_map(d, xc);
+		break;
+		case XDMA_CMD_COMMAND_INQUIRY:
+			xdma_inquiry_map(d, xc);
+		break;
+		case XDMA_CMD_COMMAND_SYNC:
+			xdma_sync_map(d, xc);
+		break;
+	}
+	return (0);
+}
+
+static uint32_t
 xdma_slow_bar_rw_common(AssignedDevRegion *d,
     target_phys_addr_t addr, uint32_t val, int len, int write) {
 
-	int cmd;
-	upci_coherent_t ch;
-	xdma_ch_ent_t *xhe;
+	upci_dma_t ud;
+	xdma_ent_t *xde;
 
-	fprintf(stderr, "%s: addr = %llx len = %lx write = %d\n",
-	    __func__, addr, len, write);
-
-	if ((xhe = xdma_find_coherent_map(d, addr)) == NULL) {
+	if ((xde = xdma_find_map(d, addr, 0)) == NULL) {
 		goto error;
 	}
 
-	fprintf(stderr, "%s: map found\n", __func__);
+	ud.ud_type = 0;
+	ud.ud_dir = write;
+	ud.ud_length = 0;
+	ud.ud_rwoff = addr - xde->xd_gx_off;
+	ud.ud_host_phys = xde->xd_hx_phys;
+	ud.ud_udata = val;
 
-	ch.ch_flags = 0;
-	ch.ch_length = len;
-	ch.ch_cookie = xhe->xh_cookie;
-	ch.ch_offset = addr - xhe->xh_virtual;
-	ch.ch_udata = val;
-
-	cmd = write ? UPCI_IOCTL_XDMA_WRITE_COHERENT :
-	    UPCI_IOCTL_XDMA_READ_COHERENT;
-
-	if (ioctl(d->region->upci_fd, cmd, &ch) == 0) {
-		return (uint32_t) ch.ch_udata;
+	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_RW, &ud) == 0) {
+		return (uint32_t) ud.ud_udata;
 	}
 error:
 	fprintf(stderr, "%s: failed\n", __func__);
