@@ -71,8 +71,8 @@ typedef struct {
     int num;            /* our index within v_addrs[] */
     pcibus_t e_size;    /* emulated size of region in bytes */
     pcibus_t r_size;    /* real size of region in bytes */
-    uint64_t xdma_virtual;
-    list_t xdma_ch_list;
+    uint64_t xdma_cur_offset;
+    list_t xdma_list;
     char xdma_command[128];
     PCIRegion *region;
 } AssignedDevRegion;

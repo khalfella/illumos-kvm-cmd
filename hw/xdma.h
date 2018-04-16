@@ -7,6 +7,8 @@
 
 
 #define XDMA_COMM_OFFSET	0x00
+#define XDMA_BEGIN_VIRTUAL	0x2000		/* 8 KB */
+#define XDMA_REGION_SIZE	0x800000	/* 8 MB */
 
 /* xdma commands */
 #define XDMA_CMD_COMMAND_ALLOC		0x01	/* allocate new map */
@@ -21,11 +23,6 @@
 /* xdma command map type */
 #define XDMA_CMD_MAP_TYPE_COH		0x01	/* coherent map */
 #define XDMA_CMD_MAP_TYPE_STR		0x02	/* streaming map */
-
-/* xdma map dir */
-#define XDMA_CMD_DIR_TO_DEVICE		0x01	/* TX */
-#define XDMA_CMD_DIR_FROM_DEVICE	0x02	/* RX */
-#define XDMA_CMD_DIR_BIDIRECTIONAL	0x03	/* TX/RX */
 
 typedef struct xdma_cmd_s {
 	uint64_t	xc_command;		/* alloc, rem, inq */
@@ -56,12 +53,11 @@ typedef struct xdma_ent_s {
 	uint64_t	xd_gb_vir;		/* guest buffer vir addr */
 	uint64_t	xd_gb_phys;		/* guest buffer phys addr */
 	uint64_t	xd_gb_off;		/* offset in guest buffer */
+
+	list_node_t	xd_next;
 } xdma_ent_t;
 
 
-
-#define XDMA_BEGIN_VIRTUAL	0x2000		/* 8 KB */
-#define XDMA_REGION_SIZE	0x800000	/* 8 MB */
 uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr);
 uint32_t xdma_slow_bar_readw(AssignedDevRegion *d, target_phys_addr_t addr);
 uint32_t xdma_slow_bar_readl(AssignedDevRegion *d, target_phys_addr_t addr);

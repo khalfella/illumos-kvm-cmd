@@ -50,7 +50,7 @@ xdma_alloc_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 	fprintf(stderr, "%s: g_xdma_off = %llx type = %llx "
 	    "dir = %llx length = %llx g_xdma_off = %llx h_xdma_phys = %llx\n"
 	    "gb_vir = %llx gb_phys = %llx gb_off = %llx\n",
-	    __func__, d->xdma_virtual, xc->xc_type,
+	    __func__, d->xdma_cur_offset, xc->xc_type,
 	    xc->xc_dir, xc->xc_size, xc->xc_gx_off, xc->xc_hx_phys,
 	    xc->xc_gb_vir, xc->xc_gb_phys, xc->xc_gb_off);
 
@@ -63,6 +63,7 @@ xdma_alloc_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 
 	ud.ud_type = (xc->xc_type == XDMA_CMD_MAP_TYPE_COH) ?
 	    DDI_DMA_CONSISTENT : DDI_DMA_STREAMING;
+	ud.ud_write = xc->xc_dir;	/* bzero */
 	ud.ud_length = xc->xc_size;
 	ud.ud_rwoff = 0;
 	ud.ud_host_phys = 0;
@@ -85,7 +86,7 @@ xdma_alloc_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 		xde->xd_gb_phys = xc->xc_gb_phys;
 		xde->xd_gb_off = xc->xc_gb_off;
 
-		list_insert_tail(&d->xdma_list, xhe);
+		list_insert_tail(&d->xdma_list, xde);
 
 		d->xdma_cur_offset += xde->xd_length;
 		d->xdma_cur_offset = ROUND_UP(d->xdma_cur_offset, 4096);
@@ -156,8 +157,8 @@ xdma_slow_bar_rw_common(AssignedDevRegion *d,
 	}
 
 	ud.ud_type = 0;
-	ud.ud_dir = write;
-	ud.ud_length = 0;
+	ud.ud_write = write;
+	ud.ud_length = len;
 	ud.ud_rwoff = addr - xde->xd_gx_off;
 	ud.ud_host_phys = xde->xd_hx_phys;
 	ud.ud_udata = val;
@@ -184,7 +185,7 @@ xdma_slow_bar_write_common(AssignedDevRegion *d,
 
 uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		return XDMA_COMM_UINT8(d, addr);
 	}
 	return xdma_slow_bar_read_common(d, addr, 1);
@@ -193,7 +194,7 @@ uint32_t xdma_slow_bar_readb(AssignedDevRegion *d, target_phys_addr_t addr)
 
 uint32_t xdma_slow_bar_readw(AssignedDevRegion *d, target_phys_addr_t addr)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		return XDMA_COMM_UINT16(d, addr);
 	}
 	return xdma_slow_bar_read_common(d, addr, 2);
@@ -201,7 +202,7 @@ uint32_t xdma_slow_bar_readw(AssignedDevRegion *d, target_phys_addr_t addr)
 
 uint32_t xdma_slow_bar_readl(AssignedDevRegion *d, target_phys_addr_t addr)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		return XDMA_COMM_UINT32(d, addr);
 	}
 	return xdma_slow_bar_read_common(d, addr, 4);
@@ -211,7 +212,7 @@ uint32_t xdma_slow_bar_readl(AssignedDevRegion *d, target_phys_addr_t addr)
 void xdma_slow_bar_writeb(AssignedDevRegion *d, target_phys_addr_t addr,
     uint32_t val)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		XDMA_COMM_UINT8(d, addr) = val;
 		if (addr == 0) {
 			xdma_execute_command(d);
@@ -225,7 +226,7 @@ void xdma_slow_bar_writeb(AssignedDevRegion *d, target_phys_addr_t addr,
 void xdma_slow_bar_writew(AssignedDevRegion *d, target_phys_addr_t addr,
     uint32_t val)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		XDMA_COMM_UINT16(d, addr) = val;
 		return;
 	}
@@ -236,7 +237,7 @@ void xdma_slow_bar_writew(AssignedDevRegion *d, target_phys_addr_t addr,
 void xdma_slow_bar_writel(AssignedDevRegion *d, target_phys_addr_t addr,
     uint32_t val)
 {
-	if (addr < sizeof(xdma_command_t)) {
+	if (addr < sizeof(xdma_cmd_t)) {
 		XDMA_COMM_UINT32(d, addr) = val;
 		return;
 	}
