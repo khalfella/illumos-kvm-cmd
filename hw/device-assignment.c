@@ -885,6 +885,7 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 	rp->base_addr = 0x6400000; /* 100 MB (random value ) */
 	rp->size = XDMA_REGION_SIZE;				/* 128M */
 	pci_dev->v_addrs[r].xdma_cur_offset = XDMA_BEGIN_VIRTUAL;	/* 8K */
+	pthread_rwlock_init(&pci_dev->v_addrs[r].xdma_rwlock, NULL);
 	list_create(&pci_dev->v_addrs[r].xdma_list,
 	    sizeof (xdma_ent_t), offsetof (xdma_ent_t, xd_next));
 	rp->flags = UPCI_IO_REG_VALID | UPCI_IO_REG_VIR; /* mem no-prefetch */
