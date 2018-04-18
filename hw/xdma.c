@@ -182,14 +182,56 @@ error:
 static uint32_t
 xdma_inquiry_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 {
+	xdma_ent_t *xde;
+
+	if ((xde = xdma_find_map(d, xc->xc_gx_off, xc->xc_hx_phys)) == NULL) {
+		goto error;
+	}
+
+	xc->xc_type = xde->xd_type;
+	xc->xc_dir = 0;
+	xc->xc_size = xde->xd_length;
+	xc->xc_gx_off = xde->xd_gx_off;
+	xc->xc_hx_phys = xde->xd_hx_phys;
+	xc->xc_gb_vir = xde->xd_gb_vir;
+	xc->xc_gb_phys = xde->xd_gb_phys;
+	xc->xc_gb_off = xde->xd_gb_off;
+
+	xc->xc_status = XDMA_CMD_STATUS_OK;
+	return (0);
+error:
 	fprintf(stderr, "%s: failed\n", __func__);
+	xc->xc_status = XDMA_CMD_STATUS_ER;
 	return (1);
 }
 
 static uint32_t
 xdma_sync_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 {
+	upci_dma_t ud;
+	xdma_ent_t *xde;
+
+	if ((xde = xdma_find_map(d, xc->xc_gx_off, xc->xc_hx_phys)) == NULL) {
+		goto error;
+	}
+
+	ud.ud_type = (xc->xc_type == XDMA_CMD_MAP_TYPE_COH) ?
+	    DDI_DMA_CONSISTENT : DDI_DMA_STREAMING;
+	ud.ud_write = (xc->xc_dir == XDMA_CMD_SYNC_FORCPU) ?
+	    DDI_DMA_SYNC_FORCPU : DDI_DMA_SYNC_FORDEV;
+	ud.ud_length = 0;
+	ud.ud_rwoff = 0;
+	ud.ud_host_phys = xde->xd_hx_phys;
+	ud.ud_udata = 0;
+
+	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_SYNC, &ud) == 0) {
+		fprintf(stderr, "%s: successfully synced\n", __func__);
+		xc->xc_status = XDMA_CMD_STATUS_OK;
+		return (0);
+	}
+error:
 	fprintf(stderr, "%s: failed\n", __func__);
+	xc->xc_status = XDMA_CMD_STATUS_ER;
 	return (1);
 }
 

@@ -8,7 +8,7 @@
 
 #define XDMA_COMM_OFFSET	0x00
 #define XDMA_BEGIN_VIRTUAL	0x2000		/* 8 KB */
-#define XDMA_REGION_SIZE	0x800000	/* 8 MB */
+#define XDMA_REGION_SIZE	0x2000000	/* 32 MB */
 
 /* xdma commands */
 #define XDMA_CMD_COMMAND_ALLOC		0x01	/* allocate new map */
@@ -23,6 +23,10 @@
 /* xdma command map type */
 #define XDMA_CMD_MAP_TYPE_COH		0x01	/* coherent map */
 #define XDMA_CMD_MAP_TYPE_STR		0x02	/* streaming map */
+
+/* sync options */
+#define XDMA_CMD_SYNC_FORCPU            0x01    /* sync for cpu */
+#define XDMA_CMD_SYNC_FORDEV            0x02    /* sync for dev */
 
 typedef struct xdma_cmd_s {
 	uint64_t	xc_command;		/* alloc, rem, inq */
