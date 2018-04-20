@@ -888,6 +888,8 @@ static int get_real_device(AssignedDevice *pci_dev, char *upci_path)
 	pthread_rwlock_init(&pci_dev->v_addrs[r].xdma_rwlock, NULL);
 	list_create(&pci_dev->v_addrs[r].xdma_list,
 	    sizeof (xdma_ent_t), offsetof (xdma_ent_t, xd_next));
+	list_create(&pci_dev->v_addrs[r].xdma_free_list,
+	    sizeof (xdma_ent_t), offsetof (xdma_ent_t, xd_next));
 	rp->flags = UPCI_IO_REG_VALID | UPCI_IO_REG_VIR; /* mem no-prefetch */
 	rp->rn = r;
 	rp->upci_fd = dev->upci_fd;

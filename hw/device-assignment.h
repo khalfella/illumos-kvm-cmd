@@ -74,6 +74,7 @@ typedef struct {
     pcibus_t r_size;    /* real size of region in bytes */
     uint64_t xdma_cur_offset;
     list_t xdma_list;
+    list_t xdma_free_list;
     pthread_rwlock_t  xdma_rwlock;
     char xdma_command[128];
     PCIRegion *region;

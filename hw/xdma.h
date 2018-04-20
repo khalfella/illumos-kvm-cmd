@@ -49,7 +49,8 @@ typedef struct xdma_cmd_s {
 typedef struct xdma_ent_s {
 	uint64_t	xd_flags;		/* active/shadow map */
 	uint64_t	xd_type;		/* coherent or streaming */
-	uint64_t	xd_length;		/* map length/size */
+	uint64_t	xd_length;		/* map used length/size */
+	uint64_t	xd_total_length;	/* map total length/size */
 	uint64_t	xd_gx_off;		/* offset in xdma map */
 	uint64_t	xd_hx_phys;		/* cookie or dma_addr_t */
 
