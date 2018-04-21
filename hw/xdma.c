@@ -115,11 +115,17 @@ xdma_exec_alloc_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 		xde->xd_type = xc->xc_type;
 		xde->xd_length = xc->xc_size;
 		xde->xd_total_length = xc->xc_size;
+		xde->xd_bbuff = 0;
 		xde->xd_gx_off = d->xdma_cur_offset;
 		xde->xd_hx_phys = ud.ud_host_phys;
 		xde->xd_gb_vir = xc->xc_gb_vir;
 		xde->xd_gb_phys = xc->xc_gb_phys;
 		xde->xd_gb_off = xc->xc_gb_off;
+
+		/* stream maps should have bounce buffers */
+		if (xc->xc_type == XDMA_CMD_MAP_TYPE_STR) {
+			xde->xd_bbuff = qemu_malloc(xc->xc_size);
+		}
 
 		list_insert_tail(&d->xdma_list, xde);
 
@@ -167,6 +173,7 @@ xdma_free_shadow_maps(AssignedDevRegion *d)
 
 		nxde = list_next(&d->xdma_free_list, xde);
 		list_remove(&d->xdma_free_list, xde);
+		qemu_free(xde->xd_bbuff);
 		qemu_free(xde);
 	}
 }
@@ -239,6 +246,12 @@ xdma_exec_sync_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 		goto error;
 	}
 
+	if (xde->xd_gb_phys != 0 && xc->xc_dir == XDMA_CMD_SYNC_FORDEV) {
+		cpu_physical_memory_read(xde->xd_gb_phys + xde->xd_gb_off,
+		    xde->xd_bbuff,
+		    xde->xd_length);
+	}
+
 	ud.ud_type = (xc->xc_type == XDMA_CMD_MAP_TYPE_COH) ?
 	    DDI_DMA_CONSISTENT : DDI_DMA_STREAMING;
 	ud.ud_write = (xc->xc_dir == XDMA_CMD_SYNC_FORCPU) ?
@@ -246,9 +259,18 @@ xdma_exec_sync_map(AssignedDevRegion *d, xdma_cmd_t *xc)
 	ud.ud_length = 0;
 	ud.ud_rwoff = 0;
 	ud.ud_host_phys = xde->xd_hx_phys;
-	ud.ud_udata = 0;
+	ud.ud_udata = (uintptr_t) (xde->xd_gb_phys? xde->xd_bbuff : NULL);
 
 	if (ioctl(d->region->upci_fd, UPCI_IOCTL_XDMA_SYNC, &ud) == 0) {
+
+		if (xde->xd_gb_phys != 0 &&
+		    xc->xc_dir == XDMA_CMD_SYNC_FORCPU) {
+			cpu_physical_memory_write(
+			    xde->xd_gb_phys + xde->xd_gb_off,
+			    xde->xd_bbuff,
+			    xde->xd_length);
+		}
+
 		xc->xc_status = XDMA_CMD_STATUS_OK;
 		pthread_rwlock_unlock(&d->xdma_rwlock);
 		return (0);

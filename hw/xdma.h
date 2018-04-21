@@ -51,6 +51,7 @@ typedef struct xdma_ent_s {
 	uint64_t	xd_type;		/* coherent or streaming */
 	uint64_t	xd_length;		/* map used length/size */
 	uint64_t	xd_total_length;	/* map total length/size */
+	void		*xd_bbuff;		/* bounce buffer */
 	uint64_t	xd_gx_off;		/* offset in xdma map */
 	uint64_t	xd_hx_phys;		/* cookie or dma_addr_t */
 
